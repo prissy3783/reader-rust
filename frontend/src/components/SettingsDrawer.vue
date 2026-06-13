@@ -159,6 +159,16 @@
           <section class="drawer-section">
             <h3 class="section-title">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+              &#36890;&#34903;&#22791;&#20221;
+            </h3>
+            <RemoteWebdavConfig />
+          </section>
+
+          <section class="drawer-section">
+            <h3 class="section-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
                 <path d="M12 16V4" />
                 <path d="m7 9 5-5 5 5" />
                 <path d="M20 16.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5" />
@@ -305,6 +315,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { changePassword, logout as apiLogout } from '../api/user'
+import RemoteWebdavConfig from './RemoteWebdavConfig.vue'
 
 const props = defineProps<{
   modelValue: boolean
