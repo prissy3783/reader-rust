@@ -222,11 +222,11 @@ pub async fn webdav_handler(
     };
     let full = join_parts(&home, &rel);
 
-    match method.as_str() {
+    let mut resp = match method.as_str() {
         "OPTIONS" => StatusCode::OK.into_response(),
         "PROPFIND" => webdav_propfind(&full, &rel_path).await,
         "MKCOL" => webdav_mkcol(&full).await,
-        "PUT" => webdav_put(&full, body).await,
+        "PUT" => webdav_put(&full, body, &state, &user_ns).await,
         "GET" => webdav_get(&full).await,
         "DELETE" => webdav_delete(&full).await,
         "MOVE" => webdav_move(&home, &full, &headers).await,
@@ -234,7 +234,17 @@ pub async fn webdav_handler(
         "LOCK" => webdav_lock(&rel_path),
         "UNLOCK" => webdav_unlock(&headers),
         _ => StatusCode::METHOD_NOT_ALLOWED.into_response(),
-    }
+    };
+    // 添加 WebDAV 标准响应头
+    let headers_mut = resp.headers_mut();
+    headers_mut.insert("DAV", "1,2".parse().unwrap());
+    headers_mut.insert(
+        "Allow",
+        "OPTIONS,DELETE,GET,PUT,PROPFIND,MKCOL,MOVE,COPY,LOCK,UNLOCK"
+            .parse()
+            .unwrap(),
+    );
+    resp
 }
 
 async fn require_webdav_user_ns(
@@ -246,7 +256,7 @@ async fn require_webdav_user_ns(
 
 async fn resolve_webdav_user(state: &AppState, headers: &HeaderMap) -> Result<String, StatusCode> {
     if !state.user_service.secure_enabled() {
-        return Err(StatusCode::FORBIDDEN);
+        return Ok("default".to_string());
     }
     let auth = headers
         .get("Authorization")
@@ -392,7 +402,7 @@ async fn webdav_mkcol(full: &PathBuf) -> Response {
     }
 }
 
-async fn webdav_put(full: &PathBuf, body: Bytes) -> Response {
+async fn webdav_put(full: &PathBuf, body: Bytes, state: &AppState, user_ns: &str) -> Response {
     if let Some(parent) = full.parent() {
         if !parent.exists() {
             return StatusCode::CONFLICT.into_response();
@@ -401,9 +411,22 @@ async fn webdav_put(full: &PathBuf, body: Bytes) -> Response {
     if full.exists() && full.is_dir() {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    if let Err(_) = fs::write(full, body).await {
+
+    // 检测是否是进度文件
+    let path_str = full.to_string_lossy();
+    let is_progress = path_str.contains("/bookProgress/") && path_str.ends_with(".json");
+
+    if let Err(_) = fs::write(full, &body).await {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
+
+    // 如果是进度文件，同步到书架
+    if is_progress {
+        if let Ok(book) = serde_json::from_slice::<crate::model::book::Book>(&body) {
+            let _ = state.book_service.save_book(user_ns, book).await;
+        }
+    }
+
     StatusCode::CREATED.into_response()
 }
 

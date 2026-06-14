@@ -5,6 +5,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::api::{self, AppState};
 use crate::app::config;
+use std::sync::Mutex;
 use crate::crawler::http_client::HttpClient;
 use crate::parser::rule_engine::RuleEngine;
 use crate::service::{
@@ -72,6 +73,7 @@ pub async fn run() -> anyhow::Result<()> {
         ai_book_service,
         ai_model_service,
         update_service,
+        webdav_config: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
 
     let app: Router = api::router::build_router(state);
