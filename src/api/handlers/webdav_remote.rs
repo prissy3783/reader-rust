@@ -79,19 +79,20 @@ pub struct RemoteWebdavFileEntry {
 // ==================== Legado 备份格式支持 ====================
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct LegadoBackup {
     #[serde(default)]
-    bookSource: Option<Vec<serde_json::Value>>,
+    book_source: Option<Vec<serde_json::Value>>,
     #[serde(default)]
     bookshelf: Option<Vec<serde_json::Value>>,
     #[serde(default)]
-    replaceRule: Option<Vec<serde_json::Value>>,
+    replace_rule: Option<Vec<serde_json::Value>>,
     #[serde(default)]
-    rssSource: Option<Vec<serde_json::Value>>,
+    rss_source: Option<Vec<serde_json::Value>>,
     #[serde(default)]
-    myBookProgress: Option<Vec<serde_json::Value>>,
+    my_book_progress: Option<Vec<serde_json::Value>>,
     #[serde(default)]
-    myBookshelf: Option<Vec<serde_json::Value>>,
+    my_bookshelf: Option<Vec<serde_json::Value>>,
 }
 
 // ==================== 辅助函数 ====================
@@ -102,12 +103,6 @@ fn basic_auth_header(username: &str, password: &str) -> String {
         base64::engine::general_purpose::STANDARD
             .encode(format!("{}:{}", username, password))
     )
-}
-
-fn storage_dir_for_user(state: &AppState, user_ns: &str) -> PathBuf {
-    PathBuf::from(&state.config.storage_dir)
-        .join("data")
-        .join(user_ns)
 }
 
 // ==================== WebDAV 配置管理 ====================
@@ -235,52 +230,68 @@ pub async fn backup_to_remote_webdav(
     let config = state.webdav_config.lock().unwrap().get(&user_ns).cloned().ok_or_else(|| {
         AppError::BadRequest("未配置远程 WebDAV".to_string())
     })?;
-    let user_dir = storage_dir_for_user(&state, &user_ns);
-    let mut backup_json = serde_json::Map::new();
-    if let Ok(data) = fs::read(user_dir.join("bookSource.json")).await {
-        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&data) {
-            backup_json.insert("bookSource".to_string(), val);
-        }
-    }
-    if let Ok(data) = fs::read(user_dir.join("bookshelf.json")).await {
-        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&data) {
-            backup_json.insert("bookshelf".to_string(), val);
-        }
-    }
-    if let Ok(data) = fs::read(user_dir.join("replaceRule.json")).await {
-        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&data) {
-            backup_json.insert("replaceRule".to_string(), val);
-        }
-    }
-    if let Ok(data) = fs::read(user_dir.join("rssSource.json")).await {
-        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&data) {
-            backup_json.insert("rssSource".to_string(), val);
-        }
-    }
+
+    // 读取所有数据类型
+    let bookshelf = state.book_service.get_bookshelf(&user_ns).await.unwrap_or_default();
+    let book_sources = state.book_source_service.list(&user_ns).await.unwrap_or_default();
+    let book_groups: Vec<crate::model::book_group::BookGroup> = state.json_document_service.read_list(&user_ns, "book_groups.json").await.unwrap_or_default();
+    let bookmarks: Vec<crate::model::bookmark::Bookmark> = state.json_document_service.read_list(&user_ns, "bookmark.json").await.unwrap_or_default();
+    let replace_rules: Vec<crate::model::replace_rule::ReplaceRule> = state.json_document_service.read_list(&user_ns, "replaceRule.json").await.unwrap_or_default();
+    let rss_sources: Vec<crate::model::rss::RssSource> = state.json_document_service.read_list(&user_ns, "rssSources.json").await.unwrap_or_default();
+
+    // 构建 ZIP 文件名 (兼容 hectorqin/reader 格式)
     let filename = format!(
-        "reader-backup-{}.zip",
-        chrono::Utc::now().format("%Y%m%d-%H%M%S")
+        "backup{}.zip",
+        chrono::Utc::now().format("%Y-%m-%d")
     );
-    let remote_path = format!("{}/{}", req.path.trim_end_matches('/'), filename);
+    let remote_path = format!("{}/legado/{}", req.path.trim_end_matches('/'), filename);
     let client = reqwest::Client::new();
     let auth_header = basic_auth_header(&config.username, &config.password);
-    let backup_value = serde_json::Value::Object(backup_json);
-    let json_str = serde_json::to_string_pretty(&backup_value)
-        .map_err(|e| AppError::Internal(e.into()))?;
+
+    // 打包为 ZIP (每个数据类型一个 JSON 文件)
     let mut zip_buf = Cursor::new(Vec::new());
     {
         let mut archive = ZipWriter::new(&mut zip_buf);
         let options = FileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
-        archive
-            .start_file("backup.json", options)
+
+        // 书源
+        let book_source_json = serde_json::to_string_pretty(&book_sources)
             .map_err(|e| AppError::Internal(e.into()))?;
-        archive
-            .write_all(json_str.as_bytes())
+        archive.start_file("bookSource.json", options.clone()).map_err(|e| AppError::Internal(e.into()))?;
+        archive.write_all(book_source_json.as_bytes()).map_err(|e| AppError::Internal(e.into()))?;
+
+        // 书架
+        let bookshelf_json = serde_json::to_string_pretty(&bookshelf)
             .map_err(|e| AppError::Internal(e.into()))?;
-        archive
-            .finish()
+        archive.start_file("bookshelf.json", options.clone()).map_err(|e| AppError::Internal(e.into()))?;
+        archive.write_all(bookshelf_json.as_bytes()).map_err(|e| AppError::Internal(e.into()))?;
+
+        // 替换规则
+        let replace_rule_json = serde_json::to_string_pretty(&replace_rules)
             .map_err(|e| AppError::Internal(e.into()))?;
+        archive.start_file("replaceRule.json", options.clone()).map_err(|e| AppError::Internal(e.into()))?;
+        archive.write_all(replace_rule_json.as_bytes()).map_err(|e| AppError::Internal(e.into()))?;
+
+        // RSS 源
+        let rss_json = serde_json::to_string_pretty(&rss_sources)
+            .map_err(|e| AppError::Internal(e.into()))?;
+        archive.start_file("rssSources.json", options.clone()).map_err(|e| AppError::Internal(e.into()))?;
+        archive.write_all(rss_json.as_bytes()).map_err(|e| AppError::Internal(e.into()))?;
+
+        // 书签
+        let bookmark_json = serde_json::to_string_pretty(&bookmarks)
+            .map_err(|e| AppError::Internal(e.into()))?;
+        archive.start_file("bookmark.json", options.clone()).map_err(|e| AppError::Internal(e.into()))?;
+        archive.write_all(bookmark_json.as_bytes()).map_err(|e| AppError::Internal(e.into()))?;
+
+        // 书籍分组
+        let group_json = serde_json::to_string_pretty(&book_groups)
+            .map_err(|e| AppError::Internal(e.into()))?;
+        archive.start_file("bookGroup.json", options).map_err(|e| AppError::Internal(e.into()))?;
+        archive.write_all(group_json.as_bytes()).map_err(|e| AppError::Internal(e.into()))?;
+
+        archive.finish().map_err(|e| AppError::Internal(e.into()))?;
     }
     let zip_bytes = zip_buf.into_inner();
     let response = client
@@ -336,7 +347,7 @@ pub async fn get_remote_webdav_file_list(
         return Ok(Json(ApiResponse::err("PROPFIND 失败")));
     }
     let body = response.text().await.map_err(|e| AppError::Internal(e.into()))?;
-    let files = parse_webdav_response(&body, &config.server_url, &path);
+    let files = parse_webdav_response(&body, &path);
     Ok(Json(ApiResponse::ok(files)))
 }
 
@@ -372,71 +383,66 @@ pub async fn restore_from_remote_webdav(
     let zip_data = response.bytes().await.map_err(|e| AppError::Internal(e.into()))?;
     let mut archive =
         ZipArchive::new(std::io::Cursor::new(zip_data)).map_err(|e| AppError::Internal(e.into()))?;
-    let mut backup_json_str = String::new();
-    let mut found = false;
+
+    // 逐个读取 ZIP 中的 JSON 文件并恢复数据
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| AppError::Internal(e.into()))?;
-        if file.name() == "backup.json" || file.name().ends_with(".json") {
-            std::io::Read::read_to_string(&mut file, &mut backup_json_str)
+        let file_content = {
+            let mut file = archive.by_index(i).map_err(|e| AppError::Internal(e.into()))?;
+            let name = file.name().to_string();
+            let mut content = String::new();
+            std::io::Read::read_to_string(&mut file, &mut content)
                 .map_err(|e| AppError::Internal(e.into()))?;
-            found = true;
-            break;
+            (name, content)
+        }; // file dropped here, before any await
+        let (name, content) = file_content;
+
+        match name.as_str() {
+            "bookshelf.json" => {
+                if let Ok(books) = serde_json::from_str::<Vec<crate::model::book::Book>>(&content) {
+                    if !books.is_empty() {
+                        let _ = state.book_service.save_books(&user_ns, books).await;
+                    }
+                }
+            }
+            "bookSource.json" => {
+                if let Ok(sources) = serde_json::from_str::<Vec<crate::model::book_source::BookSource>>(&content) {
+                    if !sources.is_empty() {
+                        let _ = state.book_source_service.save_many(&user_ns, sources).await;
+                    }
+                }
+            }
+            "replaceRule.json" => {
+                if let Ok(rules) = serde_json::from_str::<Vec<crate::model::replace_rule::ReplaceRule>>(&content) {
+                    if !rules.is_empty() {
+                        let _ = state.json_document_service.write_list(&user_ns, "replaceRule.json", &rules).await;
+                    }
+                }
+            }
+            "rssSources.json" => {
+                if let Ok(rss) = serde_json::from_str::<Vec<crate::model::rss::RssSource>>(&content) {
+                    if !rss.is_empty() {
+                        let _ = state.json_document_service.write_list(&user_ns, "rssSources.json", &rss).await;
+                    }
+                }
+            }
+            "bookmark.json" => {
+                if let Ok(bookmarks) = serde_json::from_str::<Vec<crate::model::bookmark::Bookmark>>(&content) {
+                    if !bookmarks.is_empty() {
+                        let _ = state.json_document_service.write_list(&user_ns, "bookmark.json", &bookmarks).await;
+                    }
+                }
+            }
+            "bookGroup.json" => {
+                if let Ok(groups) = serde_json::from_str::<Vec<crate::model::book_group::BookGroup>>(&content) {
+                    if !groups.is_empty() {
+                        let _ = state.json_document_service.write_list(&user_ns, "book_groups.json", &groups).await;
+                    }
+                }
+            }
+            _ => {} // 忽略其他文件
         }
     }
-    if !found {
-        return Ok(Json(ApiResponse::err("备份文件中未找到数据文件")));
-    }
-    let backup: LegadoBackup =
-        serde_json::from_str(&backup_json_str).map_err(|e| AppError::Internal(e.into()))?;
-    let user_dir = storage_dir_for_user(&state, &user_ns);
-    fs::create_dir_all(&user_dir)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-    if let Some(sources) = &backup.bookSource {
-        if !sources.is_empty() {
-            let data = serde_json::to_string_pretty(sources)
-                .map_err(|e| AppError::Internal(e.into()))?;
-            fs::write(user_dir.join("bookSource.json"), data)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
-        }
-    }
-    if let Some(shelf) = &backup.bookshelf {
-        if !shelf.is_empty() {
-            let data = serde_json::to_string_pretty(shelf)
-                .map_err(|e| AppError::Internal(e.into()))?;
-            fs::write(user_dir.join("bookshelf.json"), data)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
-        }
-    }
-    if let Some(shelf) = &backup.myBookshelf {
-        if !shelf.is_empty() {
-            let data = serde_json::to_string_pretty(shelf)
-                .map_err(|e| AppError::Internal(e.into()))?;
-            fs::write(user_dir.join("bookshelf.json"), data)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
-        }
-    }
-    if let Some(rules) = &backup.replaceRule {
-        if !rules.is_empty() {
-            let data = serde_json::to_string_pretty(rules)
-                .map_err(|e| AppError::Internal(e.into()))?;
-            fs::write(user_dir.join("replaceRule.json"), data)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
-        }
-    }
-    if let Some(rss) = &backup.rssSource {
-        if !rss.is_empty() {
-            let data = serde_json::to_string_pretty(rss)
-                .map_err(|e| AppError::Internal(e.into()))?;
-            fs::write(user_dir.join("rssSource.json"), data)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
-        }
-    }
+
     Ok(Json(ApiResponse::ok(RestoreResult {
         restored: true,
         message: "恢复完成".to_string(),
@@ -447,7 +453,6 @@ pub async fn restore_from_remote_webdav(
 
 fn parse_webdav_response(
     xml: &str,
-    server_url: &str,
     base_path: &str,
 ) -> Vec<RemoteWebdavFileEntry> {
     let mut files = Vec::new();

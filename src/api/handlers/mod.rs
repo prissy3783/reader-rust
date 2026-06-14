@@ -42,7 +42,6 @@ pub use webdav::{
 pub use webdav_remote::{
     backup_to_remote_webdav, get_remote_webdav_file_list, get_webdav_config,
     restore_from_remote_webdav, save_webdav_config, test_webdav_connection,
-    RemoteWebdavFileEntry,
 };
 
 use crate::error::error::ApiResponse;
