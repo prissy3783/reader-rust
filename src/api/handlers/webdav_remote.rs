@@ -9,7 +9,7 @@ use axum::{
 };
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use tokio::fs;
 use zip::read::ZipArchive;
