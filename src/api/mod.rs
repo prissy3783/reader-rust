@@ -27,5 +27,5 @@ pub struct AppState {
     pub ai_book_service: Arc<AiBookService>,
     pub ai_model_service: Arc<AiModelService>,
     pub update_service: Arc<UpdateService>,
-    pub webdav_config: Mutex<HashMap<String, WebdavRemoteConfig>>,
+    pub webdav_config: Arc<Mutex<HashMap<String, WebdavRemoteConfig>>>,
 }

@@ -9,7 +9,7 @@ use axum::{
 };
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::io::Read;
+use std::io::Cursor;
 use std::path::PathBuf;
 use tokio::fs;
 use zip::read::ZipArchive;
@@ -267,7 +267,7 @@ pub async fn backup_to_remote_webdav(
     let backup_value = serde_json::Value::Object(backup_json);
     let json_str = serde_json::to_string_pretty(&backup_value)
         .map_err(|e| AppError::Internal(e.into()))?;
-    let mut zip_buf = Vec::new();
+    let mut zip_buf = Cursor::new(Vec::new());
     {
         let mut archive = ZipWriter::new(&mut zip_buf);
         let options = FileOptions::default()
@@ -282,11 +282,12 @@ pub async fn backup_to_remote_webdav(
             .finish()
             .map_err(|e| AppError::Internal(e.into()))?;
     }
+    let zip_bytes = zip_buf.into_inner();
     let response = client
         .put(format!("{}{}", config.server_url, remote_path))
         .header("Authorization", auth_header)
         .header("Content-Type", "application/octet-stream")
-        .body(zip_buf.clone())
+        .body(zip_bytes.clone())
         .send()
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
@@ -298,7 +299,7 @@ pub async fn backup_to_remote_webdav(
     }
     Ok(Json(ApiResponse::ok(BackupResult {
         file_name: filename,
-        size: zip_buf.len() as u64,
+        size: zip_bytes.len() as u64,
     })))
 }
 
