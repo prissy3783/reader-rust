@@ -119,7 +119,6 @@ import {
   getWebdavConfig,
   testWebdavConnection,
   backupToRemoteWebdav,
-  getRemoteWebdavFileList,
   restoreFromRemoteWebdav,
   type RemoteWebdavConfig,
   type TestResult,
