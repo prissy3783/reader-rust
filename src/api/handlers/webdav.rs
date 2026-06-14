@@ -246,7 +246,7 @@ async fn require_webdav_user_ns(
 
 async fn resolve_webdav_user(state: &AppState, headers: &HeaderMap) -> Result<String, StatusCode> {
     if !state.user_service.secure_enabled() {
-        return Err(StatusCode::FORBIDDEN);
+        return Ok("default".to_string());
     }
     let auth = headers
         .get("Authorization")
