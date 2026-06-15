@@ -787,7 +787,10 @@ pub async fn get_book_content(
     // Determine book_url and chapter_url
     let (book_url, chapter_url) = if let Some(url) = &req.chapter_url {
         // Check if url looks like a book URL (not a chapter URL) and we have an index
-        if req.index.is_some() && !url.contains("/read/") && !url.contains("/chapter/") {
+        if let Some(raw_index) = req
+            .index
+            .filter(|_| !url.contains("/read/") && !url.contains("/chapter/"))
+        {
             // url is bookUrl, need to get chapter from index
             let source = resolve_book_source(
                 &state,
@@ -815,7 +818,7 @@ pub async fn get_book_content(
                 .book_service
                 .get_chapter_list_with_cache(&user_ns, &source, toc_url, do_refresh)
                 .await?;
-            let idx = req.index.unwrap() as usize;
+            let idx = raw_index as usize;
 
             if idx >= chapters.len() {
                 // If index is out of range, it's possible our cache was partial (first page only).
@@ -2216,8 +2219,8 @@ pub async fn get_available_book_source(
     while cursor < sources.len() {
         let batch_end = (cursor + concurrent_count).min(sources.len());
         let mut tasks: FuturesUnordered<_> = FuturesUnordered::new();
-        for source_index in cursor..batch_end {
-            let source = sources[source_index].clone();
+        for (source_index, source) in sources[cursor..batch_end].iter().enumerate() {
+            let source = source.clone();
             let svc = state.book_service.clone();
             let name = book.name.clone();
             let author = book.author.clone();
@@ -2636,10 +2639,10 @@ async fn resolve_book_source(
     if let Some(url) = &book_source_url {
         let normalized = normalize_source_url(url);
         if !normalized.is_empty() {
-            if let Some(src) = state.book_source_service.get(&user_ns, &normalized).await? {
+            if let Some(src) = state.book_source_service.get(user_ns, &normalized).await? {
                 return Ok(src);
             }
-            let sources = state.book_source_service.list(&user_ns).await?;
+            let sources = state.book_source_service.list(user_ns).await?;
             if let Some(src) = sources
                 .into_iter()
                 .find(|s| normalize_source_url(&s.book_source_url) == normalized)
@@ -2652,17 +2655,17 @@ async fn resolve_book_source(
 
     // Try to find book_source_url from shelf book
     if let Some(b_url) = book_url {
-        if let Ok(Some(shelf_book)) = state.book_service.get_shelf_book(&user_ns, b_url).await {
+        if let Ok(Some(shelf_book)) = state.book_service.get_shelf_book(user_ns, b_url).await {
             let shelf_origin = normalize_source_url(&shelf_book.origin);
             if !shelf_origin.is_empty() {
                 if let Some(src) = state
                     .book_source_service
-                    .get(&user_ns, &shelf_origin)
+                    .get(user_ns, &shelf_origin)
                     .await?
                 {
                     return Ok(src);
                 }
-                let sources = state.book_source_service.list(&user_ns).await?;
+                let sources = state.book_source_service.list(user_ns).await?;
                 if let Some(src) = sources
                     .into_iter()
                     .find(|s| normalize_source_url(&s.book_source_url) == shelf_origin)
@@ -2682,7 +2685,7 @@ async fn resolve_book_source(
         if !b_host.is_empty() {
             // Extract root domain for comparison (e.g., "22biqu" from "m.22biqu.com")
             let b_root = extract_root_domain(&b_host);
-            let sources = state.book_source_service.list(&user_ns).await?;
+            let sources = state.book_source_service.list(user_ns).await?;
             for s in sources {
                 let normalized_source_url = normalize_source_url(&s.book_source_url);
                 if let Ok(s_url) = url::Url::parse(&normalized_source_url) {

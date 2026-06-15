@@ -300,8 +300,8 @@ fn normalize_rel_path(path: &str) -> Result<Vec<String>, AppError> {
     Ok(parts)
 }
 
-fn join_parts(home: &PathBuf, parts: &Vec<String>) -> PathBuf {
-    let mut p = home.clone();
+fn join_parts(home: &std::path::Path, parts: &Vec<String>) -> PathBuf {
+    let mut p = home.to_path_buf();
     for part in parts {
         p = p.join(part);
     }
@@ -401,7 +401,7 @@ async fn webdav_put(full: &PathBuf, body: Bytes) -> Response {
     if full.exists() && full.is_dir() {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    if let Err(_) = fs::write(full, body).await {
+    if fs::write(full, body).await.is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     StatusCode::CREATED.into_response()
@@ -435,7 +435,7 @@ async fn webdav_delete(full: &PathBuf) -> Response {
     }
 }
 
-async fn webdav_move(home: &PathBuf, full: &PathBuf, headers: &HeaderMap) -> Response {
+async fn webdav_move(home: &std::path::Path, full: &PathBuf, headers: &HeaderMap) -> Response {
     let destination = headers
         .get("Destination")
         .and_then(|v| v.to_str().ok())
@@ -473,7 +473,7 @@ async fn webdav_move(home: &PathBuf, full: &PathBuf, headers: &HeaderMap) -> Res
     }
 }
 
-async fn webdav_copy(home: &PathBuf, full: &PathBuf, headers: &HeaderMap) -> Response {
+async fn webdav_copy(home: &std::path::Path, full: &PathBuf, headers: &HeaderMap) -> Response {
     let destination = headers
         .get("Destination")
         .and_then(|v| v.to_str().ok())

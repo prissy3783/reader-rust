@@ -70,6 +70,7 @@ pub fn eval_js_with_bindings(
     )
 }
 
+#[allow(dead_code)]
 pub fn eval_js_search_with_source(
     script: &str,
     key: &str,

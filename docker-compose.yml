@@ -1,0 +1,27 @@
+services:
+  reader-rust:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - linux/arm64
+    image: ghcr.io/prissy3783/reader-rust:latest
+    container_name: reader-rust
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./storage:/app/storage
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+      - DATABASE_URL=sqlite:/app/storage/reader.db?mode=rwc
+      - STORAGE_DIR=/app/storage
+      - LOG_LEVEL=info
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
