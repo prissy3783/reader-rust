@@ -11,6 +11,7 @@ mod update;
 mod user;
 #[cfg(feature = "webdav")]
 mod webdav;
+pub mod webdav_remote;
 
 pub use ai_book::*;
 pub use ai_model::*;
@@ -37,8 +38,12 @@ pub use user::{
 };
 #[cfg(feature = "webdav")]
 pub use webdav::{
-    delete_webdav_file, delete_webdav_file_list, get_webdav_file, get_webdav_file_list,
-    upload_file_to_webdav, webdav_handler,
+    delete_webdav_file, delete_webdav_file_list, get_webdav_file,
+    get_webdav_file_list, upload_file_to_webdav, webdav_handler,
+};
+pub use webdav_remote::{
+    backup_to_remote_webdav, get_remote_webdav_file_list, get_webdav_config,
+    restore_from_remote_webdav, save_webdav_config, test_webdav_connection,
 };
 
 use crate::error::error::ApiResponse;

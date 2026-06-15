@@ -12,6 +12,9 @@ pub enum AppError {
     NotFound(String),
     #[error("bad request: {0}")]
     BadRequest(String),
+    #[error("unauthorized")]
+    #[allow(dead_code)]
+    Unauthorized,
     #[error("internal error")]
     Internal(#[from] anyhow::Error),
     #[error("db error")]
@@ -59,6 +62,7 @@ impl IntoResponse for AppError {
         let (status, message) = match &self {
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized".to_string()),
             AppError::Db(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "database error".to_string(),

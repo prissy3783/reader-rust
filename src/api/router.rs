@@ -292,7 +292,28 @@ pub fn build_router(state: AppState) -> Router {
                 "/reader3/deleteWebdavFileList",
                 post(handlers::delete_webdav_file_list),
             )
-            .route("/reader3/webdav/*path", any(handlers::webdav_handler));
+            .route("/reader3/webdav/*path", any(handlers::webdav_handler))
+            .route(
+                "/reader3/saveWebdavConfig",
+                post(handlers::save_webdav_config),
+            )
+            .route("/reader3/getWebdavConfig", get(handlers::get_webdav_config))
+            .route(
+                "/reader3/testWebdavConnection",
+                post(handlers::test_webdav_connection),
+            )
+            .route(
+                "/reader3/backupToRemoteWebdav",
+                post(handlers::backup_to_remote_webdav),
+            )
+            .route(
+                "/reader3/getRemoteWebdavFileList",
+                get(handlers::get_remote_webdav_file_list),
+            )
+            .route(
+                "/reader3/restoreFromRemoteWebdav",
+                post(handlers::restore_from_remote_webdav),
+            );
     }
 
     let api = api.with_state(state.clone());
