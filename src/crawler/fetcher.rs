@@ -4,16 +4,12 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum HttpMethod {
+    #[default]
     GET,
     POST,
-}
-
-impl Default for HttpMethod {
-    fn default() -> Self {
-        Self::GET
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -11,7 +11,7 @@ use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 pub fn build_router(state: AppState) -> Router {
-    let api = Router::new()
+    let mut api = Router::new()
         .route("/health", get(handlers::health))
         .route(
             "/reader3/getBookSource",
@@ -249,49 +249,6 @@ pub fn build_router(state: AppState) -> Router {
             "/reader3/deleteReplaceRules",
             post(handlers::delete_replace_rules),
         )
-        .route(
-            "/reader3/getWebdavFileList",
-            get(handlers::get_webdav_file_list),
-        )
-        .route("/reader3/getWebdavFile", get(handlers::get_webdav_file))
-        .route(
-            "/reader3/uploadFileToWebdav",
-            post(handlers::upload_file_to_webdav),
-        )
-        .route(
-            "/reader3/deleteWebdavFile",
-            post(handlers::delete_webdav_file),
-        )
-        .route(
-            "/reader3/deleteWebdavFileList",
-            post(handlers::delete_webdav_file_list),
-        )
-        .route("/reader3/webdav/*path", any(handlers::webdav_handler))
-        // 远程 WebDAV 同步
-        .route(
-            "/reader3/saveWebdavConfig",
-            post(handlers::save_webdav_config),
-        )
-        .route(
-            "/reader3/getWebdavConfig",
-            get(handlers::get_webdav_config),
-        )
-        .route(
-            "/reader3/testWebdavConnection",
-            post(handlers::test_webdav_connection),
-        )
-        .route(
-            "/reader3/backupToRemoteWebdav",
-            post(handlers::backup_to_remote_webdav),
-        )
-        .route(
-            "/reader3/getRemoteWebdavFileList",
-            get(handlers::get_remote_webdav_file_list),
-        )
-        .route(
-            "/reader3/restoreFromRemoteWebdav",
-            post(handlers::restore_from_remote_webdav),
-        )
         .route("/reader3/login", post(handlers::login))
         .route("/reader3/logout", post(handlers::logout))
         .route("/reader3/getUserInfo", get(handlers::get_user_info))
@@ -313,8 +270,53 @@ pub fn build_router(state: AppState) -> Router {
         .route("/reader3/updateUser", post(handlers::update_user))
         .route("/reader3/uploadFile", post(handlers::upload_file))
         .route("/reader3/deleteFile", post(handlers::delete_file))
-        .route("/reader3/getTxtTocRules", get(handlers::get_txt_toc_rules))
-        .with_state(state.clone());
+        .route("/reader3/getTxtTocRules", get(handlers::get_txt_toc_rules));
+
+    #[cfg(feature = "webdav")]
+    {
+        api = api
+            .route(
+                "/reader3/getWebdavFileList",
+                get(handlers::get_webdav_file_list),
+            )
+            .route("/reader3/getWebdavFile", get(handlers::get_webdav_file))
+            .route(
+                "/reader3/uploadFileToWebdav",
+                post(handlers::upload_file_to_webdav),
+            )
+            .route(
+                "/reader3/deleteWebdavFile",
+                post(handlers::delete_webdav_file),
+            )
+            .route(
+                "/reader3/deleteWebdavFileList",
+                post(handlers::delete_webdav_file_list),
+            )
+            .route("/reader3/webdav/*path", any(handlers::webdav_handler))
+            .route(
+                "/reader3/saveWebdavConfig",
+                post(handlers::save_webdav_config),
+            )
+            .route("/reader3/getWebdavConfig", get(handlers::get_webdav_config))
+            .route(
+                "/reader3/testWebdavConnection",
+                post(handlers::test_webdav_connection),
+            )
+            .route(
+                "/reader3/backupToRemoteWebdav",
+                post(handlers::backup_to_remote_webdav),
+            )
+            .route(
+                "/reader3/getRemoteWebdavFileList",
+                get(handlers::get_remote_webdav_file_list),
+            )
+            .route(
+                "/reader3/restoreFromRemoteWebdav",
+                post(handlers::restore_from_remote_webdav),
+            );
+    }
+
+    let api = api.with_state(state.clone());
 
     let web_root = state.config.web_root.clone();
     let assets_root = state.config.assets_dir.clone();
@@ -333,6 +335,6 @@ pub fn build_router(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
         .layer(TraceLayer::new_for_http())
         .layer(PropagateRequestIdLayer::x_request_id())
-        .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid::default()))
+        .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
         .layer(CorsLayer::very_permissive())
 }

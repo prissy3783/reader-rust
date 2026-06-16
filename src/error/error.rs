@@ -13,6 +13,7 @@ pub enum AppError {
     #[error("bad request: {0}")]
     BadRequest(String),
     #[error("unauthorized")]
+    #[allow(dead_code)]
     Unauthorized,
     #[error("internal error")]
     Internal(#[from] anyhow::Error),

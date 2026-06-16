@@ -164,7 +164,7 @@ pub fn set_invalid_book_source_group(source: &mut BookSource, invalid: bool) -> 
 }
 
 fn split_source_groups(raw: &str) -> Vec<String> {
-    raw.split(|ch| matches!(ch, ',' | ';' | '；' | '、'))
+    raw.split([',', ';', '；', '、'])
         .map(str::trim)
         .filter(|group| !group.is_empty())
         .map(str::to_string)

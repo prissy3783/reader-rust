@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct BookListRule {
     pub book_list: Option<String>,
     pub name: Option<String>,

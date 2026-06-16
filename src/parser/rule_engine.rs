@@ -619,7 +619,6 @@ impl RuleEngine {
                 is_vip,
                 is_pay,
                 is_volume,
-                ..Default::default()
             });
         }
         (out, vec![])
@@ -673,7 +672,6 @@ impl RuleEngine {
                 is_vip,
                 is_pay,
                 is_volume,
-                ..Default::default()
             });
         }
         (out, vec![])
@@ -1178,7 +1176,6 @@ fn parse_chapter_list_html(
             is_vip,
             is_pay,
             is_volume,
-            ..Default::default()
         });
     }
 
@@ -1260,7 +1257,6 @@ fn parse_chapter_list_xpath(
             is_vip,
             is_pay,
             is_volume,
-            ..Default::default()
         });
     }
 
@@ -1345,7 +1341,6 @@ fn parse_chapter_list_json(
             is_vip,
             is_pay,
             is_volume,
-            ..Default::default()
         });
     }
 
@@ -1465,14 +1460,12 @@ fn interpolate_json_templates(
             return val;
         }
 
-        match eval_js(
+        eval_js(
             expr,
             &serde_json::to_string(v).unwrap_or_default(),
             base_url,
-        ) {
-            Ok(res) => res,
-            Err(_) => String::new(),
-        }
+        )
+        .unwrap_or_default()
     })
     .into_owned()
 }
@@ -1546,8 +1539,7 @@ fn eval_field_html_with_ctx(
 ) -> Option<String> {
     // Handle mode forcing prefixes
     let rule = rule.trim();
-    if rule.starts_with("@css:") {
-        let pure = &rule[5..];
+    if let Some(pure) = rule.strip_prefix("@css:") {
         return eval_field_html_with_ctx(pure, el, base_url, ctx);
     }
     if rule.starts_with("@xpath:") {
@@ -1604,12 +1596,10 @@ fn eval_field_html_doc_with_ctx(
 ) -> Option<String> {
     // Handle mode forcing prefixes
     let rule = rule.trim();
-    if rule.starts_with("@css:") {
-        let pure = &rule[5..];
+    if let Some(pure) = rule.strip_prefix("@css:") {
         return eval_field_html_doc_with_ctx(pure, doc, base_url, ctx);
     }
-    if rule.starts_with("@xpath:") {
-        let pure = &rule[7..];
+    if let Some(pure) = rule.strip_prefix("@xpath:") {
         return html::select_xpath(&doc.html(), pure).first().cloned();
     }
 
@@ -1768,9 +1758,8 @@ fn eval_field_json_with_ctx(
 
     let mut text = if pure.is_empty() {
         "".to_string()
-    } else if pure.contains("{{") && pure.contains("}}") {
-        pure.to_string()
-    } else if pure.contains('/')
+    } else if pure.contains("{{") && pure.contains("}}")
+        || pure.contains('/')
         || pure.contains('?')
         || pure.contains('&')
         || pure.contains('=')
@@ -1804,8 +1793,7 @@ fn try_put_get_html(
     base_url: &str,
     ctx: &mut HashMap<String, String>,
 ) -> Option<String> {
-    if rule.starts_with("@put:") {
-        let content = &rule[5..];
+    if let Some(content) = rule.strip_prefix("@put:") {
         if content.starts_with('{') && content.ends_with('}') {
             let inner = &content[1..content.len() - 1];
             for part in inner.split(',') {
@@ -1820,8 +1808,7 @@ fn try_put_get_html(
         }
         return Some("".to_string());
     }
-    if rule.starts_with("@get:") {
-        let content = &rule[5..];
+    if let Some(content) = rule.strip_prefix("@get:") {
         if content.starts_with('{') && content.ends_with('}') {
             let key = &content[1..content.len() - 1].trim();
             return ctx.get(*key).cloned();
@@ -1836,8 +1823,7 @@ fn try_put_get_html_doc(
     base_url: &str,
     ctx: &mut HashMap<String, String>,
 ) -> Option<String> {
-    if rule.starts_with("@put:") {
-        let content = &rule[5..];
+    if let Some(content) = rule.strip_prefix("@put:") {
         if content.starts_with('{') && content.ends_with('}') {
             let inner = &content[1..content.len() - 1];
             for part in inner.split(',') {
@@ -1852,8 +1838,7 @@ fn try_put_get_html_doc(
         }
         return Some("".to_string());
     }
-    if rule.starts_with("@get:") {
-        let content = &rule[5..];
+    if let Some(content) = rule.strip_prefix("@get:") {
         if content.starts_with('{') && content.ends_with('}') {
             let key = &content[1..content.len() - 1].trim();
             return ctx.get(*key).cloned();
@@ -1868,8 +1853,7 @@ fn try_put_get_json(
     base_url: &str,
     ctx: &mut HashMap<String, String>,
 ) -> Option<String> {
-    if rule.starts_with("@put:") {
-        let content = &rule[5..];
+    if let Some(content) = rule.strip_prefix("@put:") {
         if content.starts_with('{') && content.ends_with('}') {
             let inner = &content[1..content.len() - 1];
             for part in inner.split(',') {
@@ -1884,8 +1868,7 @@ fn try_put_get_json(
         }
         return Some("".to_string());
     }
-    if rule.starts_with("@get:") {
-        let content = &rule[5..];
+    if let Some(content) = rule.strip_prefix("@get:") {
         if content.starts_with('{') && content.ends_with('}') {
             let key = &content[1..content.len() - 1].trim();
             return ctx.get(*key).cloned();
@@ -1900,8 +1883,7 @@ fn try_put_get_xpath(
     base_url: &str,
     ctx: &mut HashMap<String, String>,
 ) -> Option<String> {
-    if rule.starts_with("@put:") {
-        let content = &rule[5..];
+    if let Some(content) = rule.strip_prefix("@put:") {
         if content.starts_with('{') && content.ends_with('}') {
             let inner = &content[1..content.len() - 1];
             for part in inner.split(',') {
@@ -1916,8 +1898,7 @@ fn try_put_get_xpath(
         }
         return Some(String::new());
     }
-    if rule.starts_with("@get:") {
-        let content = &rule[5..];
+    if let Some(content) = rule.strip_prefix("@get:") {
         if content.starts_with('{') && content.ends_with('}') {
             let key = &content[1..content.len() - 1].trim();
             return ctx.get(*key).cloned();
@@ -1940,8 +1921,8 @@ fn apply_legado_regex(text: &str, regex_part: &str) -> String {
     }
 
     // Handle ### suffix for first-match-only replacement
-    let (regex_part, first_only) = if regex_part.ends_with("###") {
-        (&regex_part[..regex_part.len() - 3], true)
+    let (regex_part, first_only) = if let Some(stripped) = regex_part.strip_suffix("###") {
+        (stripped, true)
     } else {
         (regex_part, false)
     };

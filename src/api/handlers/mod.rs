@@ -9,6 +9,7 @@ mod replace_rule;
 mod rss;
 mod update;
 mod user;
+#[cfg(feature = "webdav")]
 mod webdav;
 pub mod webdav_remote;
 
@@ -35,6 +36,7 @@ pub use user::{
     add_user, change_password, delete_file, delete_users, get_user_config, get_user_info,
     get_user_list, login, logout, reset_password, save_user_config, update_user, upload_file,
 };
+#[cfg(feature = "webdav")]
 pub use webdav::{
     delete_webdav_file, delete_webdav_file_list, get_webdav_file,
     get_webdav_file_list, upload_file_to_webdav, webdav_handler,
