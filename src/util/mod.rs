@@ -1,3 +1,4 @@
+pub mod atomic;
 pub mod crypto;
 pub mod hash;
 pub mod text;

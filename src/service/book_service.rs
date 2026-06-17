@@ -1199,13 +1199,8 @@ impl BookService {
 
     async fn write_bookshelf(&self, user_ns: &str, list: &Vec<Book>) -> Result<(), AppError> {
         let path = self.bookshelf_path(user_ns);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
-        }
         let data = serde_json::to_string(list).map_err(|e| AppError::BadRequest(e.to_string()))?;
-        fs::write(&path, data)
+        crate::util::atomic::write_atomic_string(&path, &data)
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
         Ok(())

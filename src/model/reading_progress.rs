@@ -67,16 +67,21 @@ pub enum ConflictResolution {
 }
 
 impl ReadingProgress {
+    /// 计算 SHA256 BookID (稳定跨设备标识)
+    pub fn compute_book_id(url: &str, source: &str, name: &str) -> String {
+        if !url.is_empty() {
+            crate::util::hash::book_id_from_url(url)
+        } else {
+            crate::util::hash::book_id_fallback(source, name)
+        }
+    }
+
     /// 从 Book 结构体导出进度
     pub fn from_book(book: &crate::model::book::Book) -> Option<Self> {
         let chapter_index = book.dur_chapter_index?;
         let last_read_time = book.dur_chapter_time.unwrap_or(0);
         Some(Self {
-            book_id: if book.book_url.is_empty() {
-                format!("{}:{}", book.name, book.author)
-            } else {
-                book.book_url.clone()
-            },
+            book_id: Self::compute_book_id(&book.book_url, &book.origin, &book.name),
             book_name: book.name.clone(),
             author: book.author.clone(),
             chapter_index,
@@ -204,11 +209,7 @@ impl ReadingProgress {
         let book_url = get_string(&["bookUrl", "book_url"]);
 
         Self {
-            book_id: if book_url.is_empty() {
-                format!("{}:{}", book_name, author)
-            } else {
-                book_url
-            },
+            book_id: Self::compute_book_id(&book_url, "", &book_name),
             book_name,
             author,
             chapter_index: get_i32(&[
@@ -361,7 +362,9 @@ mod tests {
         let progress = ReadingProgress::from_legado_json(json.as_bytes()).unwrap();
         assert_eq!(progress.chapter_index, 5);
         assert_eq!(progress.scroll_offset, 200);
-        assert_eq!(progress.book_id, "https://example.com/book/1");
+        // book_id is SHA256(normalized_url)
+        let expected_id = crate::util::hash::book_id_from_url("https://example.com/book/1");
+        assert_eq!(progress.book_id, expected_id);
     }
 
     #[test]

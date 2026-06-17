@@ -727,10 +727,10 @@ pub async fn restore_from_remote_webdav(
                     }
                 };
 
-                // 写入 bookProgress JSON
+                // 写入 bookProgress JSON (原子写入)
                 let json = serde_json::to_string_pretty(&winner.to_legado_json())
                     .map_err(|e| AppError::Internal(e.into()))?;
-                fs::write(&local_path, json)
+                crate::util::atomic::write_atomic_string(&local_path, &json)
                     .await
                     .map_err(|e| AppError::Internal(e.into()))?;
 
@@ -762,10 +762,13 @@ async fn find_book_on_shelf(
         .get_bookshelf(user_ns)
         .await
         .unwrap_or_default();
-    // 先按 book_url 精确匹配
+    // 先按 SHA256(book_url) 匹配
     if !progress.book_id.is_empty() {
         for book in &shelf {
-            if book.book_url == progress.book_id {
+            let book_id = crate::model::reading_progress::ReadingProgress::compute_book_id(
+                &book.book_url, &book.origin, &book.name,
+            );
+            if book_id == progress.book_id {
                 return Some(book.clone());
             }
         }

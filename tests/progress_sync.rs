@@ -16,8 +16,9 @@ fn make_book(name: &str, author: &str, chapter: i32, pos: i32, time: i64) -> Boo
 }
 
 fn make_progress(name: &str, author: &str, chapter: i32, pos: i32, time: i64) -> ReadingProgress {
+    let url = format!("https://example.com/{}", name);
     ReadingProgress {
-        book_id: format!("https://example.com/{}", name),
+        book_id: reader_rust::util::hash::book_id_from_url(&url),
         book_name: name.to_string(),
         author: author.to_string(),
         chapter_index: chapter,
@@ -192,7 +193,9 @@ fn test_legado_full_json_parse() {
     assert_eq!(p.chapter_title, "第五百二十三章");
     assert_eq!(p.scroll_offset, 0);
     assert_eq!(p.last_read_time, 1718640000000);
-    assert_eq!(p.book_id, "https://example.com/book/123");
+    // book_id is SHA256(normalized_url)
+    let expected_id = reader_rust::util::hash::book_id_from_url("https://example.com/book/123");
+    assert_eq!(p.book_id, expected_id);
     assert_eq!(p.book_name, "学霸的军工科研系统");
     assert_eq!(p.author, "十月廿二");
 }
