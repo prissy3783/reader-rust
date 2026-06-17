@@ -47,6 +47,14 @@ pub struct BookSource {
     pub respond_time: Option<i64>,
     pub load_with_base_url: Option<bool>,
     pub single_url: Option<bool>,
+    #[serde(deserialize_with = "deserialize_i64_option")]
+    pub last_check_time: Option<i64>,
+    #[serde(deserialize_with = "deserialize_i64_option")]
+    pub latency_ms: Option<i64>,
+    #[serde(deserialize_with = "deserialize_i64_option")]
+    pub health_level: Option<i64>,
+    #[serde(deserialize_with = "deserialize_i64_option")]
+    pub consecutive_failures: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

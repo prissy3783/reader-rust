@@ -1128,6 +1128,51 @@ pub async fn set_as_default_book_sources(
     )))
 }
 
+pub async fn get_book_source_health(
+    State(state): State<AppState>,
+    auth: AuthContext,
+) -> Result<Json<ApiResponse<Vec<serde_json::Value>>>, AppError> {
+    let user_ns = state
+        .user_service
+        .resolve_user_ns_with_override(auth.access_token(), auth.secure_key(), auth.user_ns())
+        .await
+        .map_err(|_| AppError::BadRequest("NEED_LOGIN".to_string()))?;
+
+    let mut sources = state.book_source_service.list(&user_ns).await?;
+
+    for source in &mut sources {
+        let health = crate::service::health::SourceHealth {
+            level: source.health_level.unwrap_or(0) as i32,
+            latency_ms: source.latency_ms.unwrap_or(0),
+            search_ok: source.search_url.is_some(),
+            toc_ok: source.rule_toc.is_some(),
+            content_ok: source.rule_content.is_some(),
+            consecutive_failures: source.consecutive_failures.unwrap_or(0) as i32,
+        };
+        crate::service::health::apply_health_to_source(source, &health);
+    }
+
+    crate::service::health::sort_sources_by_health(&mut sources);
+
+    let result: Vec<serde_json::Value> = sources
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "name": s.book_source_name,
+                "url": s.book_source_url,
+                "group": s.book_source_group,
+                "enabled": s.enabled.unwrap_or(false),
+                "healthLevel": s.health_level.unwrap_or(0),
+                "latencyMs": s.latency_ms.unwrap_or(0),
+                "lastCheckTime": s.last_check_time.unwrap_or(0),
+                "consecutiveFailures": s.consecutive_failures.unwrap_or(0),
+            })
+        })
+        .collect();
+
+    Ok(Json(ApiResponse::ok(result)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

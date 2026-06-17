@@ -38,6 +38,10 @@ pub fn build_router(state: AppState) -> Router {
             post(handlers::test_book_sources),
         )
         .route(
+            "/reader3/getBookSourceHealth",
+            get(handlers::get_book_source_health),
+        )
+        .route(
             "/reader3/deleteInvalidBookSources",
             post(handlers::delete_invalid_book_sources),
         )
