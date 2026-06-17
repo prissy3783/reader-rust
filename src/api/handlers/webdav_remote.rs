@@ -766,7 +766,9 @@ async fn find_book_on_shelf(
     if !progress.book_id.is_empty() {
         for book in &shelf {
             let book_id = crate::model::reading_progress::ReadingProgress::compute_book_id(
-                &book.book_url, &book.origin, &book.name,
+                &book.book_url,
+                &book.origin,
+                &book.name,
             );
             if book_id == progress.book_id {
                 return Some(book.clone());

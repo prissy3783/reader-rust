@@ -5,7 +5,6 @@ use tracing_subscriber::EnvFilter;
 
 use crate::api::{self, AppState};
 use crate::app::config;
-use std::sync::Mutex;
 use crate::crawler::http_client::HttpClient;
 use crate::parser::rule_engine::RuleEngine;
 use crate::service::{
@@ -16,6 +15,7 @@ use crate::service::{
     update_service::UpdateService, user_service::UserService,
 };
 use crate::storage::{cache::file_cache::FileCache, db, fs::storage_fs::StorageFs};
+use std::sync::Mutex;
 
 pub async fn run() -> anyhow::Result<()> {
     println!("DEBUG: starting bootstrap::run");

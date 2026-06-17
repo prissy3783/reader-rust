@@ -25,7 +25,7 @@
       <input 
         v-model="password" 
         type="password" 
-        placeholder="密码"
+        :placeholder="config.enabled ? '已保存密码（留空则保留原密码）' : '密码'"
         :disabled="!editable"
       />
     </div>
@@ -79,7 +79,7 @@
       
       <button 
         class="btn btn-warning" 
-        @click="showRestoreDialog = true"
+        @click="openRestoreDialog"
         :disabled="!config.enabled"
       >
         从远程恢复
@@ -87,22 +87,27 @@
     </div>
     
     <!-- 恢复确认对话框 -->
-    <div v-if="showRestoreDialog" class="modal-overlay" @click="showRestoreDialog = false">
+    <div v-if="showRestoreDialog" class="modal-overlay" @click="closeRestoreDialog">
       <div class="modal-content" @click.stop>
         <h3>确认恢复</h3>
         <p>从远程 WebDAV 恢复数据将覆盖当前所有数据。</p>
         <p>请选择要恢复的备份文件：</p>
         
-        <select v-model="selectedBackup" class="backup-select">
-          <option value="">加载中...</option>
+        <div v-if="loadingBackups" class="backup-loading">正在加载备份列表...</div>
+        <div v-else-if="backupFiles.length === 0" class="backup-empty">未找到备份文件</div>
+        <select v-else v-model="selectedBackup" class="backup-select">
+          <option value="">-- 请选择 --</option>
+          <option v-for="file in backupFiles" :key="file.path" :value="file.path">
+            {{ file.name }} ({{ formatSize(file.size) }})
+          </option>
         </select>
         
         <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showRestoreDialog = false">取消</button>
+          <button class="btn btn-secondary" @click="closeRestoreDialog">取消</button>
           <button 
             class="btn btn-danger" 
             @click="restoreFromRemote"
-            :disabled="!selectedBackup"
+            :disabled="!selectedBackup || loadingBackups"
           >
             确认恢复
           </button>
@@ -119,8 +124,10 @@ import {
   getWebdavConfig,
   testWebdavConnection,
   backupToRemoteWebdav,
+  getRemoteWebdavFileList,
   restoreFromRemoteWebdav,
   type RemoteWebdavConfig,
+  type RemoteWebdavFileEntry,
   type TestResult,
 } from '../api/webdav'
 
@@ -135,6 +142,8 @@ const editable = ref(false)
 const testResult = ref<TestResult | null>(null)
 const showRestoreDialog = ref(false)
 const selectedBackup = ref('')
+const backupFiles = ref<RemoteWebdavFileEntry[]>([])
+const loadingBackups = ref(false)
 
 onMounted(async () => {
   try {
@@ -148,6 +157,40 @@ onMounted(async () => {
 function cancelEdit() {
   editable.value = false
   password.value = ''
+}
+
+function closeRestoreDialog() {
+  showRestoreDialog.value = false
+  selectedBackup.value = ''
+  backupFiles.value = []
+}
+
+function formatSize(bytes: number) {
+  if (!bytes) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex++
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`
+}
+
+async function loadBackupFiles() {
+  loadingBackups.value = true
+  backupFiles.value = []
+  try {
+    const files = await getRemoteWebdavFileList('/legado')
+    backupFiles.value = files
+      .filter(f => !f.isDirectory && f.name.endsWith('.zip'))
+      .sort((a, b) => b.lastModified - a.lastModified)
+  } catch (error) {
+    console.error('Failed to load backup files:', error)
+    backupFiles.value = []
+  } finally {
+    loadingBackups.value = false
+  }
 }
 
 async function saveConfig() {
@@ -180,11 +223,16 @@ async function testConnection() {
 
 async function backupNow() {
   try {
-    await backupToRemoteWebdav('/backups')
+    await backupToRemoteWebdav('')
     testResult.value = { connected: true, message: '备份成功' }
   } catch (error) {
     testResult.value = { connected: false, message: '备份失败' }
   }
+}
+
+function openRestoreDialog() {
+  showRestoreDialog.value = true
+  loadBackupFiles()
 }
 
 async function restoreFromRemote() {
@@ -338,5 +386,16 @@ async function restoreFromRemote() {
   border-radius: 4px;
   background: var(--color-bg-elevated);
   color: var(--color-text);
+}
+
+.backup-loading,
+.backup-empty {
+  padding: 12px;
+  margin: 8px 0;
+  text-align: center;
+  border-radius: 4px;
+  background: var(--color-bg-sunken);
+  color: var(--color-text-secondary);
+  font-size: 14px;
 }
 </style>

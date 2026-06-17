@@ -411,17 +411,43 @@ pub fn select_list<'a>(doc: &'a Html, selector: &str) -> Vec<ElementRef<'a>> {
     // Split by @ first to get the base selector (handle @@ separately in text extraction)
     let sel_text = selector.split("@@").next().unwrap_or(selector).trim();
     let split = split_top_level(sel_text, &["@"]);
+
+    // Handle list combination operators at the top level
+    if sel_text.contains("&&") || sel_text.contains("||") || sel_text.contains("%%") {
+        return select_with_combination(doc, sel_text);
+    }
+
+    // Follow the @ chain: .chapter@li@a means .chapter → li → a
+    if split.parts.len() > 1 {
+        let mut current_matches: Vec<ElementRef<'a>> = vec![];
+        for (i, part) in split.parts.iter().enumerate() {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let parsed = parse_selector_with_index(part);
+            if i == 0 {
+                current_matches = collect_matches(doc, &parsed);
+            } else {
+                let mut next_matches = Vec::new();
+                for current in &current_matches {
+                    next_matches.extend(collect_matches_from_element(*current, &parsed));
+                }
+                current_matches = next_matches;
+            }
+            if current_matches.is_empty() {
+                return vec![];
+            }
+        }
+        return current_matches;
+    }
+
     let sel_text = split
         .parts
         .first()
         .map(String::as_str)
         .unwrap_or(sel_text)
         .trim();
-
-    // Handle list combination operators at the top level
-    if sel_text.contains("&&") || sel_text.contains("||") || sel_text.contains("%%") {
-        return select_with_combination(doc, sel_text);
-    }
 
     collect_matches(doc, &parse_selector_with_index(sel_text))
 }

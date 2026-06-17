@@ -423,7 +423,10 @@ async fn webdav_put(full: &PathBuf, body: Bytes, state: &AppState, user_ns: &str
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
 
-    if crate::util::atomic::write_atomic(full, &body).await.is_err() {
+    if crate::util::atomic::write_atomic(full, &body)
+        .await
+        .is_err()
+    {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
@@ -496,7 +499,9 @@ async fn webdav_put(full: &PathBuf, body: Bytes, state: &AppState, user_ns: &str
             if let Ok(shelf) = state.book_service.get_bookshelf(user_ns).await {
                 for book in shelf {
                     let book_id = crate::model::reading_progress::ReadingProgress::compute_book_id(
-                        &book.book_url, &book.origin, &book.name,
+                        &book.book_url,
+                        &book.origin,
+                        &book.name,
                     );
                     if book_id == winner.book_id
                         || (book.name == winner.book_name && book.author == winner.author)

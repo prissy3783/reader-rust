@@ -1,5 +1,5 @@
 use md5::{Digest, Md5};
-use sha2::{Sha256};
+use sha2::Sha256;
 
 pub fn md5_hex(input: &str) -> String {
     let mut hasher = Md5::new();
@@ -43,7 +43,10 @@ mod tests {
     fn test_sha256_hex() {
         let hash = sha256_hex("hello");
         assert_eq!(hash.len(), 64);
-        assert_eq!(hash, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        assert_eq!(
+            hash,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
     }
 
     #[test]
@@ -81,8 +84,17 @@ mod tests {
 
     #[test]
     fn test_normalize_book_url() {
-        assert_eq!(normalize_book_url("https://example.com/book/1/"), "https://example.com/book/1");
-        assert_eq!(normalize_book_url("HTTPS://Example.COM/Book/1"), "https://example.com/book/1");
-        assert_eq!(normalize_book_url("https://example.com/book/1#section"), "https://example.com/book/1");
+        assert_eq!(
+            normalize_book_url("https://example.com/book/1/"),
+            "https://example.com/book/1"
+        );
+        assert_eq!(
+            normalize_book_url("HTTPS://Example.COM/Book/1"),
+            "https://example.com/book/1"
+        );
+        assert_eq!(
+            normalize_book_url("https://example.com/book/1#section"),
+            "https://example.com/book/1"
+        );
     }
 }

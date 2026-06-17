@@ -14,9 +14,15 @@ impl SourceHealth {
     pub fn score(&self) -> f64 {
         let mut score: f64 = 0.0;
 
-        if self.search_ok { score += 30.0; }
-        if self.toc_ok { score += 30.0; }
-        if self.content_ok { score += 30.0; }
+        if self.search_ok {
+            score += 30.0;
+        }
+        if self.toc_ok {
+            score += 30.0;
+        }
+        if self.content_ok {
+            score += 30.0;
+        }
 
         let latency_score = match self.latency_ms {
             0..=1000 => 10.0,
@@ -72,7 +78,13 @@ pub fn sort_sources_by_health(sources: &mut Vec<BookSource>) {
 mod tests {
     use super::*;
 
-    fn make_health(search_ok: bool, toc_ok: bool, content_ok: bool, latency_ms: i64, failures: i32) -> SourceHealth {
+    fn make_health(
+        search_ok: bool,
+        toc_ok: bool,
+        content_ok: bool,
+        latency_ms: i64,
+        failures: i32,
+    ) -> SourceHealth {
         SourceHealth {
             level: 0,
             latency_ms,
@@ -131,9 +143,24 @@ mod tests {
     #[test]
     fn test_sort_by_health() {
         let mut sources = vec![
-            { let mut s = BookSource::default(); s.health_level = Some(2); s.latency_ms = Some(3000); s },
-            { let mut s = BookSource::default(); s.health_level = Some(5); s.latency_ms = Some(500); s },
-            { let mut s = BookSource::default(); s.health_level = Some(5); s.latency_ms = Some(200); s },
+            {
+                let mut s = BookSource::default();
+                s.health_level = Some(2);
+                s.latency_ms = Some(3000);
+                s
+            },
+            {
+                let mut s = BookSource::default();
+                s.health_level = Some(5);
+                s.latency_ms = Some(500);
+                s
+            },
+            {
+                let mut s = BookSource::default();
+                s.health_level = Some(5);
+                s.latency_ms = Some(200);
+                s
+            },
         ];
         sort_sources_by_health(&mut sources);
         assert_eq!(sources[0].latency_ms, Some(200));

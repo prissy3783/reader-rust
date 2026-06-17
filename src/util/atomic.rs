@@ -77,7 +77,9 @@ mod tests {
         let _ = fs::create_dir_all(&dir).await;
         let path = dir.join("test.json");
 
-        write_atomic_string(&path, r#"{"key":"value"}"#).await.unwrap();
+        write_atomic_string(&path, r#"{"key":"value"}"#)
+            .await
+            .unwrap();
         let content = fs::read_to_string(&path).await.unwrap();
         assert_eq!(content, r#"{"key":"value"}"#);
 
