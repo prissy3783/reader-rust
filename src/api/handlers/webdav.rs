@@ -403,26 +403,108 @@ async fn webdav_mkcol(full: &PathBuf) -> Response {
 }
 
 async fn webdav_put(full: &PathBuf, body: Bytes, state: &AppState, user_ns: &str) -> Response {
+    // 检测是否是进度文件
+    let path_str = full.to_string_lossy();
+    let is_progress = path_str.contains("/bookProgress/") && path_str.ends_with(".json");
+
     if let Some(parent) = full.parent() {
         if !parent.exists() {
-            return StatusCode::CONFLICT.into_response();
+            if is_progress {
+                // bookProgress 目录自动创建 (兼容 Legado)
+                if fs::create_dir_all(parent).await.is_err() {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            } else {
+                return StatusCode::CONFLICT.into_response();
+            }
         }
     }
     if full.exists() && full.is_dir() {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    // 检测是否是进度文件
-    let path_str = full.to_string_lossy();
-    let is_progress = path_str.contains("/bookProgress/") && path_str.ends_with(".json");
 
     if fs::write(full, &body).await.is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    // 如果是进度文件，同步到书架
+    // 如果是进度文件，使用 ReadingProgress 冲突解决后同步到书架
     if is_progress {
-        if let Ok(book) = serde_json::from_slice::<crate::model::book::Book>(&body) {
-            let _ = state.book_service.save_book(user_ns, book).await;
+        if let Some(remote_progress) =
+            crate::model::reading_progress::ReadingProgress::from_legado_json(&body)
+        {
+            let debug_enabled = std::env::var("DEBUG_WEBDAV").unwrap_or_default() == "true";
+            // 读取本地已有进度做冲突解决
+            let local_progress = if full.exists() {
+                fs::read(full).await.ok().and_then(|d| {
+                    crate::model::reading_progress::ReadingProgress::from_legado_json(&d)
+                })
+            } else {
+                None
+            };
+            let winner = match local_progress {
+                Some(local) => {
+                    let resolution =
+                        crate::model::reading_progress::ReadingProgress::resolve_conflict(
+                            &local,
+                            &remote_progress,
+                        );
+                    match resolution {
+                        crate::model::reading_progress::ConflictResolution::UseLocal => {
+                            if debug_enabled {
+                                println!(
+                                    "[Progress Sync] book={} local=ch{} remote=ch{} winner=local",
+                                    remote_progress.book_name,
+                                    local.chapter_index,
+                                    remote_progress.chapter_index
+                                );
+                            }
+                            local
+                        }
+                        crate::model::reading_progress::ConflictResolution::UseRemote => {
+                            if debug_enabled {
+                                println!(
+                                    "[Progress Sync] book={} local=ch{} remote=ch{} winner=remote",
+                                    remote_progress.book_name,
+                                    local.chapter_index,
+                                    remote_progress.chapter_index
+                                );
+                            }
+                            remote_progress.clone()
+                        }
+                        crate::model::reading_progress::ConflictResolution::Merged(merged) => {
+                            if debug_enabled {
+                                println!(
+                                    "[Progress Sync] book={} merged to ch{}",
+                                    remote_progress.book_name, merged.chapter_index
+                                );
+                            }
+                            merged
+                        }
+                    }
+                }
+                None => {
+                    if debug_enabled {
+                        println!(
+                            "[Progress Sync] book={} ch{} (new)",
+                            remote_progress.book_name, remote_progress.chapter_index
+                        );
+                    }
+                    remote_progress.clone()
+                }
+            };
+            // 同步到书架
+            if let Ok(shelf) = state.book_service.get_bookshelf(user_ns).await {
+                for book in shelf {
+                    if book.book_url == winner.book_id
+                        || (book.name == winner.book_name && book.author == winner.author)
+                    {
+                        let mut updated = book;
+                        winner.apply_to_book(&mut updated);
+                        let _ = state.book_service.save_book(user_ns, updated).await;
+                        break;
+                    }
+                }
+            }
         }
     }
 

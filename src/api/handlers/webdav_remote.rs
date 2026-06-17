@@ -2,6 +2,7 @@ use crate::api::auth::AuthContext;
 use crate::api::handlers::webdav::WebdavPathRequest;
 use crate::api::AppState;
 use crate::error::error::{ApiResponse, AppError};
+use crate::model::reading_progress::ReadingProgress;
 use crate::util::time::now_ts;
 use axum::{
     extract::{Query, State},
@@ -9,11 +10,18 @@ use axum::{
 };
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use tokio::fs;
 use zip::read::ZipArchive;
 use zip::write::{FileOptions, ZipWriter};
+
+fn debug_log(msg: &str) {
+    if std::env::var("DEBUG_WEBDAV").unwrap_or_default() == "true" {
+        println!("[Progress Sync] {}", msg);
+    }
+}
 
 // ==================== 远程 WebDAV 客户端功能 ====================
 
@@ -104,6 +112,39 @@ fn basic_auth_header(username: &str, password: &str) -> String {
     )
 }
 
+async fn load_saved_password(state: &AppState, user_ns: &str) -> Option<String> {
+    // 先从内存缓存获取
+    if let Some(c) = state.webdav_config.lock().unwrap().get(user_ns) {
+        return Some(c.password.clone());
+    }
+    // 再从磁盘获取
+    let config_path = PathBuf::from(&state.config.storage_dir)
+        .join("data")
+        .join(user_ns)
+        .join("webdav_remote_config.json");
+    if config_path.exists() {
+        if let Ok(data) = fs::read(&config_path).await {
+            if let Ok(config) = serde_json::from_slice::<WebdavRemoteConfig>(&data) {
+                // 加载到内存缓存
+                state
+                    .webdav_config
+                    .lock()
+                    .unwrap()
+                    .insert(user_ns.to_string(), config.clone());
+                return Some(config.password);
+            }
+        }
+    }
+    None
+}
+
+fn extract_username(access_token: Option<&str>) -> String {
+    access_token
+        .and_then(|t| t.split(':').next())
+        .unwrap_or("default")
+        .to_string()
+}
+
 // ==================== WebDAV 配置管理 ====================
 
 pub async fn save_webdav_config(
@@ -114,14 +155,19 @@ pub async fn save_webdav_config(
     if !req.server_url.starts_with("http://") && !req.server_url.starts_with("https://") {
         return Ok(Json(ApiResponse::err("URL 格式不正确")));
     }
-    let user_ns = auth
-        .access_token()
-        .map(|t| t.to_string())
-        .unwrap_or_else(|| "default".to_string());
+    let user_ns = extract_username(auth.access_token());
+    // 空密码保留旧密码
+    let password = if req.password.is_empty() {
+        load_saved_password(&state, &user_ns)
+            .await
+            .unwrap_or_default()
+    } else {
+        req.password
+    };
     let config = WebdavRemoteConfig {
         server_url: req.server_url,
         username: req.username,
-        password: req.password,
+        password,
         enabled: true,
     };
     state
@@ -147,10 +193,7 @@ pub async fn get_webdav_config(
     State(state): State<AppState>,
     auth: AuthContext,
 ) -> Result<Json<ApiResponse<WebdavConfigResponse>>, AppError> {
-    let user_ns = auth
-        .access_token()
-        .map(|t| t.to_string())
-        .unwrap_or_else(|| "default".to_string());
+    let user_ns = extract_username(auth.access_token());
     if let Some(c) = state.webdav_config.lock().unwrap().get(&user_ns) {
         return Ok(Json(ApiResponse::ok(WebdavConfigResponse {
             server_url: c.server_url.clone(),
@@ -187,10 +230,21 @@ pub async fn get_webdav_config(
 }
 
 pub async fn test_webdav_connection(
+    State(state): State<AppState>,
+    auth: AuthContext,
     Json(req): Json<SaveWebdavConfigRequest>,
 ) -> Result<Json<ApiResponse<TestResult>>, AppError> {
+    // 空密码使用已保存密码
+    let password = if req.password.is_empty() {
+        let user_ns = extract_username(auth.access_token());
+        load_saved_password(&state, &user_ns)
+            .await
+            .unwrap_or_default()
+    } else {
+        req.password
+    };
     let client = reqwest::Client::new();
-    let auth_header = basic_auth_header(&req.username, &req.password);
+    let auth_header = basic_auth_header(&req.username, &password);
     let response = client
         .request(
             reqwest::Method::from_bytes(b"PROPFIND").unwrap(),
@@ -224,17 +278,20 @@ pub async fn backup_to_remote_webdav(
     auth: AuthContext,
     Json(req): Json<BackupRequest>,
 ) -> Result<Json<ApiResponse<BackupResult>>, AppError> {
-    let user_ns = auth
-        .access_token()
-        .map(|t| t.to_string())
-        .unwrap_or_else(|| "default".to_string());
-    let config = state
+    let user_ns = extract_username(auth.access_token());
+    let mut config = state
         .webdav_config
         .lock()
         .unwrap()
         .get(&user_ns)
         .cloned()
         .ok_or_else(|| AppError::BadRequest("未配置远程 WebDAV".to_string()))?;
+    // 确保密码已加载
+    if config.password.is_empty() {
+        if let Some(saved) = load_saved_password(&state, &user_ns).await {
+            config.password = saved;
+        }
+    }
 
     // 读取所有数据类型
     let bookshelf = state
@@ -273,6 +330,37 @@ pub async fn backup_to_remote_webdav(
     let remote_path = format!("{}/legado/{}", req.path.trim_end_matches('/'), filename);
     let client = reqwest::Client::new();
     let auth_header = basic_auth_header(&config.username, &config.password);
+
+    // 收集 bookProgress 文件
+    let book_progress_dir = PathBuf::from(&state.config.storage_dir)
+        .join("webdav")
+        .join(&user_ns)
+        .join("legado")
+        .join("backgroundd")
+        .join("bookProgress");
+    let mut progress_files: HashMap<String, Vec<u8>> = HashMap::new();
+    if book_progress_dir.exists() {
+        if let Ok(mut entries) = fs::read_dir(&book_progress_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                    if let Ok(data) = fs::read(&path).await {
+                        let name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("")
+                            .to_string();
+                        debug_log(&format!("backup: include bookProgress/{}", name));
+                        progress_files.insert(name, data);
+                    }
+                }
+            }
+        }
+    }
+    debug_log(&format!(
+        "backup: collected {} bookProgress files",
+        progress_files.len()
+    ));
 
     // 打包为 ZIP (每个数据类型一个 JSON 文件)
     let mut zip_buf = Cursor::new(Vec::new());
@@ -340,6 +428,17 @@ pub async fn backup_to_remote_webdav(
             .write_all(group_json.as_bytes())
             .map_err(|e| AppError::Internal(e.into()))?;
 
+        // bookProgress 文件 (Legado 兼容目录结构)
+        for (name, data) in &progress_files {
+            let entry_path = format!("legado/backgroundd/bookProgress/{}", name);
+            archive
+                .start_file(&entry_path, options)
+                .map_err(|e| AppError::Internal(e.into()))?;
+            archive
+                .write_all(data)
+                .map_err(|e| AppError::Internal(e.into()))?;
+        }
+
         archive.finish().map_err(|e| AppError::Internal(e.into()))?;
     }
     let zip_bytes = zip_buf.into_inner();
@@ -370,17 +469,20 @@ pub async fn get_remote_webdav_file_list(
     auth: AuthContext,
     Query(req): Query<WebdavPathRequest>,
 ) -> Result<Json<ApiResponse<Vec<RemoteWebdavFileEntry>>>, AppError> {
-    let user_ns = auth
-        .access_token()
-        .map(|t| t.to_string())
-        .unwrap_or_else(|| "default".to_string());
-    let config = state
+    let user_ns = extract_username(auth.access_token());
+    let mut config = state
         .webdav_config
         .lock()
         .unwrap()
         .get(&user_ns)
         .cloned()
         .ok_or_else(|| AppError::BadRequest("未配置远程 WebDAV".to_string()))?;
+    // 确保密码已加载
+    if config.password.is_empty() {
+        if let Some(saved) = load_saved_password(&state, &user_ns).await {
+            config.password = saved;
+        }
+    }
     let client = reqwest::Client::new();
     let auth_header = basic_auth_header(&config.username, &config.password);
     let path = req.path.unwrap_or_else(|| "/".to_string());
@@ -411,17 +513,20 @@ pub async fn restore_from_remote_webdav(
     auth: AuthContext,
     Json(req): Json<RestoreRequest>,
 ) -> Result<Json<ApiResponse<RestoreResult>>, AppError> {
-    let user_ns = auth
-        .access_token()
-        .map(|t| t.to_string())
-        .unwrap_or_else(|| "default".to_string());
-    let config = state
+    let user_ns = extract_username(auth.access_token());
+    let mut config = state
         .webdav_config
         .lock()
         .unwrap()
         .get(&user_ns)
         .cloned()
         .ok_or_else(|| AppError::BadRequest("未配置远程 WebDAV".to_string()))?;
+    // 确保密码已加载
+    if config.password.is_empty() {
+        if let Some(saved) = load_saved_password(&state, &user_ns).await {
+            config.password = saved;
+        }
+    }
     let client = reqwest::Client::new();
     let auth_header = basic_auth_header(&config.username, &config.password);
     let url = format!("{}{}", config.server_url, req.path);
@@ -445,22 +550,41 @@ pub async fn restore_from_remote_webdav(
         .map_err(|e| AppError::Internal(e.into()))?;
 
     // 逐个读取 ZIP 中的 JSON 文件并恢复数据
+    let mut progress_entries: Vec<(String, Vec<u8>)> = Vec::new();
     for i in 0..archive.len() {
         let file_content = {
             let mut file = archive
                 .by_index(i)
                 .map_err(|e| AppError::Internal(e.into()))?;
             let name = file.name().to_string();
-            let mut content = String::new();
-            std::io::Read::read_to_string(&mut file, &mut content)
+            let mut content = Vec::new();
+            std::io::Read::read_to_end(&mut file, &mut content)
                 .map_err(|e| AppError::Internal(e.into()))?;
             (name, content)
         }; // file dropped here, before any await
         let (name, content) = file_content;
 
+        // 检测 bookProgress 文件 (两种路径格式)
+        let is_book_progress = name.starts_with("legado/backgroundd/bookProgress/")
+            || (name.starts_with("bookProgress/") && name.ends_with(".json"));
+
+        if is_book_progress {
+            let filename = name.rsplit('/').next().unwrap_or(&name);
+            debug_log(&format!("restore: found bookProgress/{}", filename));
+            progress_entries.push((filename.to_string(), content));
+            continue;
+        }
+
+        let content_str = match String::from_utf8(content) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
         match name.as_str() {
             "bookshelf.json" => {
-                if let Ok(books) = serde_json::from_str::<Vec<crate::model::book::Book>>(&content) {
+                if let Ok(books) =
+                    serde_json::from_str::<Vec<crate::model::book::Book>>(&content_str)
+                {
                     if !books.is_empty() {
                         let _ = state.book_service.save_books(&user_ns, books).await;
                     }
@@ -468,7 +592,7 @@ pub async fn restore_from_remote_webdav(
             }
             "bookSource.json" => {
                 if let Ok(sources) =
-                    serde_json::from_str::<Vec<crate::model::book_source::BookSource>>(&content)
+                    serde_json::from_str::<Vec<crate::model::book_source::BookSource>>(&content_str)
                 {
                     if !sources.is_empty() {
                         let _ = state.book_source_service.save_many(&user_ns, sources).await;
@@ -476,8 +600,9 @@ pub async fn restore_from_remote_webdav(
                 }
             }
             "replaceRule.json" => {
-                if let Ok(rules) =
-                    serde_json::from_str::<Vec<crate::model::replace_rule::ReplaceRule>>(&content)
+                if let Ok(rules) = serde_json::from_str::<
+                    Vec<crate::model::replace_rule::ReplaceRule>,
+                >(&content_str)
                 {
                     if !rules.is_empty() {
                         let _ = state
@@ -488,7 +613,8 @@ pub async fn restore_from_remote_webdav(
                 }
             }
             "rssSources.json" => {
-                if let Ok(rss) = serde_json::from_str::<Vec<crate::model::rss::RssSource>>(&content)
+                if let Ok(rss) =
+                    serde_json::from_str::<Vec<crate::model::rss::RssSource>>(&content_str)
                 {
                     if !rss.is_empty() {
                         let _ = state
@@ -500,7 +626,7 @@ pub async fn restore_from_remote_webdav(
             }
             "bookmark.json" => {
                 if let Ok(bookmarks) =
-                    serde_json::from_str::<Vec<crate::model::bookmark::Bookmark>>(&content)
+                    serde_json::from_str::<Vec<crate::model::bookmark::Bookmark>>(&content_str)
                 {
                     if !bookmarks.is_empty() {
                         let _ = state
@@ -512,7 +638,7 @@ pub async fn restore_from_remote_webdav(
             }
             "bookGroup.json" => {
                 if let Ok(groups) =
-                    serde_json::from_str::<Vec<crate::model::book_group::BookGroup>>(&content)
+                    serde_json::from_str::<Vec<crate::model::book_group::BookGroup>>(&content_str)
                 {
                     if !groups.is_empty() {
                         let _ = state
@@ -526,10 +652,131 @@ pub async fn restore_from_remote_webdav(
         }
     }
 
+    // 恢复 bookProgress 文件 (冲突解决: last_read_time 优先)
+    if !progress_entries.is_empty() {
+        debug_log(&format!(
+            "restore: processing {} bookProgress entries",
+            progress_entries.len()
+        ));
+        let book_progress_dir = PathBuf::from(&state.config.storage_dir)
+            .join("webdav")
+            .join(&user_ns)
+            .join("legado")
+            .join("backgroundd")
+            .join("bookProgress");
+        fs::create_dir_all(&book_progress_dir)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        for (filename, data) in &progress_entries {
+            if let Some(remote_progress) = ReadingProgress::from_legado_json(data) {
+                // 读取本地已有进度
+                let local_path = book_progress_dir.join(filename);
+                let local_progress = if local_path.exists() {
+                    fs::read(&local_path)
+                        .await
+                        .ok()
+                        .and_then(|d| ReadingProgress::from_legado_json(&d))
+                } else {
+                    None
+                };
+
+                // 冲突解决
+                let winner = match local_progress {
+                    Some(local) => {
+                        let resolution =
+                            ReadingProgress::resolve_conflict(&local, &remote_progress);
+                        match resolution {
+                            crate::model::reading_progress::ConflictResolution::UseLocal => {
+                                debug_log(&format!(
+                                    "conflict: book={} local=ch{} remote=ch{} winner=local (newer: {}ms vs {}ms)",
+                                    remote_progress.book_name,
+                                    local.chapter_index,
+                                    remote_progress.chapter_index,
+                                    local.last_read_time,
+                                    remote_progress.last_read_time
+                                ));
+                                local
+                            }
+                            crate::model::reading_progress::ConflictResolution::UseRemote => {
+                                debug_log(&format!(
+                                    "conflict: book={} local=ch{} remote=ch{} winner=remote (newer: {}ms vs {}ms)",
+                                    remote_progress.book_name,
+                                    local.chapter_index,
+                                    remote_progress.chapter_index,
+                                    local.last_read_time,
+                                    remote_progress.last_read_time
+                                ));
+                                remote_progress.clone()
+                            }
+                            crate::model::reading_progress::ConflictResolution::Merged(merged) => {
+                                debug_log(&format!(
+                                    "conflict: book={} merged to ch{}",
+                                    remote_progress.book_name, merged.chapter_index
+                                ));
+                                merged
+                            }
+                        }
+                    }
+                    None => {
+                        debug_log(&format!(
+                            "restore: new progress book={} ch{}",
+                            remote_progress.book_name, remote_progress.chapter_index
+                        ));
+                        remote_progress.clone()
+                    }
+                };
+
+                // 写入 bookProgress JSON
+                let json = serde_json::to_string_pretty(&winner.to_legado_json())
+                    .map_err(|e| AppError::Internal(e.into()))?;
+                fs::write(&local_path, json)
+                    .await
+                    .map_err(|e| AppError::Internal(e.into()))?;
+
+                // 同步到书架
+                if let Some(book) = find_book_on_shelf(&state, &user_ns, &winner).await {
+                    let mut updated = book;
+                    winner.apply_to_book(&mut updated);
+                    let _ = state.book_service.save_book(&user_ns, updated).await;
+                }
+            }
+        }
+    }
+
     Ok(Json(ApiResponse::ok(RestoreResult {
         restored: true,
         message: "恢复完成".to_string(),
     })))
+}
+
+// ==================== 辅助函数 ====================
+
+async fn find_book_on_shelf(
+    state: &AppState,
+    user_ns: &str,
+    progress: &ReadingProgress,
+) -> Option<crate::model::book::Book> {
+    let shelf = state
+        .book_service
+        .get_bookshelf(user_ns)
+        .await
+        .unwrap_or_default();
+    // 先按 book_url 精确匹配
+    if !progress.book_id.is_empty() {
+        for book in &shelf {
+            if book.book_url == progress.book_id {
+                return Some(book.clone());
+            }
+        }
+    }
+    // 再按 name + author 模糊匹配
+    for book in &shelf {
+        if book.name == progress.book_name && book.author == progress.author {
+            return Some(book.clone());
+        }
+    }
+    None
 }
 
 // ==================== XML 解析 ====================
