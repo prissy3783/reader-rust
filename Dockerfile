@@ -1,20 +1,6 @@
-FROM node:20-alpine AS frontend-builder
-
-WORKDIR /frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
-
-FROM rust:1.85-alpine AS rust-builder
-
-RUN apk add --no-cache musl-dev openssl-dev pkgconfig sqlite-dev
-
-WORKDIR /src
-COPY Cargo.toml Cargo.lock ./
-COPY src ./src
-
-RUN cargo build --release --features webdav
+# Dockerfile for aarch64 - using pre-built binary
+# Build binary first: cargo build --release --target aarch64-unknown-linux-musl
+# Build frontend first: cd frontend && npm install && npm run build
 
 FROM alpine:3.20
 
@@ -22,8 +8,8 @@ RUN apk add --no-cache ca-certificates tzdata curl sqlite-libs
 
 WORKDIR /app
 
-COPY --from=rust-builder /src/target/release/reader-rust /app/reader-rust
-COPY --from=frontend-builder /frontend/dist /app/web/dist
+COPY target/aarch64-unknown-linux-musl/release/reader-rust /app/reader-rust
+COPY frontend/dist /app/web/dist
 
 RUN mkdir -p /app/storage/assets
 
