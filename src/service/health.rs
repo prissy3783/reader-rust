@@ -61,7 +61,7 @@ pub fn apply_health_to_source(source: &mut BookSource, health: &SourceHealth) {
     source.consecutive_failures = Some(health.consecutive_failures as i64);
 }
 
-pub fn sort_sources_by_health(sources: &mut Vec<BookSource>) {
+pub fn sort_sources_by_health(sources: &mut [BookSource]) {
     sources.sort_by(|a, b| {
         let level_a = a.health_level.unwrap_or(0);
         let level_b = b.health_level.unwrap_or(0);
