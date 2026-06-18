@@ -251,7 +251,7 @@ impl ReadingProgress {
         serde_json::json!({
             "durChapterIndex": self.chapter_index,
             "durChapterTitle": self.chapter_title,
-            "durChapterPos": self.scroll_offset,
+            "durChapterPos": 0,
             "durChapterTime": self.last_read_time,
             "bookUrl": self.book_id,
             "name": self.book_name,
@@ -441,9 +441,11 @@ mod tests {
             ..Default::default()
         };
         let json = original.to_legado_json();
+        // durChapterPos is always 0 in Legado format
+        assert_eq!(json["durChapterPos"], 0);
         let restored = ReadingProgress::from_legado_json(json.to_string().as_bytes()).unwrap();
         assert_eq!(restored.chapter_index, 42);
-        assert_eq!(restored.scroll_offset, 512);
+        assert_eq!(restored.scroll_offset, 0);
         assert_eq!(restored.last_read_time, 1718640000000);
     }
 }

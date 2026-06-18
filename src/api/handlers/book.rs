@@ -880,6 +880,33 @@ pub async fn get_book_content(
         .book_service
         .get_content(&user_ns, &book_url, &source, &chapter_url)
         .await?;
+
+    // Save progress to WebDAV (hectorqin compatibility)
+    if let Ok(Some(shelf_book)) = state.book_service.get_shelf_book(&user_ns, &book_url).await {
+        let chapter_index = req.index.unwrap_or(0);
+        let chapter_title = if let Ok(chapters) = state
+            .book_service
+            .get_chapter_list_with_cache(&user_ns, &source, &book_url, false)
+            .await
+        {
+            if (chapter_index as usize) < chapters.len() {
+                Some(chapters[chapter_index as usize].title.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        crate::api::handlers::webdav_remote::save_book_progress_to_webdav(
+            &state,
+            &user_ns,
+            &shelf_book,
+            chapter_index,
+            chapter_title.as_deref().unwrap_or(""),
+        )
+        .await;
+    }
+
     Ok(Json(ApiResponse::ok(serde_json::Value::String(content))))
 }
 

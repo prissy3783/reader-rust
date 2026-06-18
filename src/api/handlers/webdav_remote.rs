@@ -752,6 +752,54 @@ pub async fn restore_from_remote_webdav(
 
 // ==================== 辅助函数 ====================
 
+// ==================== 进度同步辅助 ====================
+
+pub async fn save_book_progress_to_webdav(
+    state: &AppState,
+    user_ns: &str,
+    book: &crate::model::book::Book,
+    chapter_index: i32,
+    chapter_title: &str,
+) {
+    let progress_dir = PathBuf::from(&state.config.storage_dir)
+        .join("webdav")
+        .join(user_ns)
+        .join("legado")
+        .join("backgroundd")
+        .join("bookProgress");
+    let _ = fs::create_dir_all(&progress_dir).await;
+
+    let safe_name = book.name.replace(['/', '\\'], "_");
+    let safe_author = book.author.replace(['/', '\\'], "_");
+    let filename = if safe_author.is_empty() {
+        format!("{}.json", safe_name)
+    } else {
+        format!("{}_{}.json", safe_name, safe_author)
+    };
+
+    let progress = ReadingProgress {
+        book_id: ReadingProgress::compute_book_id(&book.book_url, &book.origin, &book.name),
+        book_name: book.name.clone(),
+        author: book.author.clone(),
+        chapter_index,
+        chapter_title: chapter_title.to_string(),
+        page_index: 0,
+        scroll_offset: 0,
+        position: 0,
+        progress_percent: 0.0,
+        last_read_time: crate::util::time::now_ts(),
+    };
+
+    let json = progress.to_legado_json();
+    let json_str = serde_json::to_string_pretty(&json).unwrap_or_default();
+    let path = progress_dir.join(&filename);
+    debug_log(&format!(
+        "saveBookProgressToWebdav: book={} ch{}",
+        book.name, chapter_index
+    ));
+    let _ = crate::util::atomic::write_atomic_string(&path, &json_str).await;
+}
+
 async fn find_book_on_shelf(
     state: &AppState,
     user_ns: &str,

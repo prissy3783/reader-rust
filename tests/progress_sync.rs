@@ -36,10 +36,12 @@ fn test_single_device_sync_roundtrip() {
     let book = make_book("测试书", "作者A", 10, 500, 1718640000000);
     let progress = ReadingProgress::from_book(&book).unwrap();
     let json = progress.to_legado_json();
+    // durChapterPos is always 0 in Legado format
+    assert_eq!(json["durChapterPos"], 0);
     let restored = ReadingProgress::from_legado_json(json.to_string().as_bytes()).unwrap();
 
     assert_eq!(restored.chapter_index, 10);
-    assert_eq!(restored.scroll_offset, 500);
+    assert_eq!(restored.scroll_offset, 0);
     assert_eq!(restored.last_read_time, 1718640000000);
     assert_eq!(restored.book_name, "测试书");
     assert_eq!(restored.author, "作者A");
