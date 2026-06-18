@@ -275,6 +275,78 @@ fn eval_js_inner_with_source(
             "uuid",
             Func::new(|| -> String { Uuid::new_v4().to_string() }),
         )?;
+        // P1: ajaxAll - concurrent HTTP requests (sequential in QuickJS)
+        java_obj.set(
+            "ajaxAll",
+            Func::new(|urls: Vec<String>| -> Vec<String> {
+                urls.iter()
+                    .map(|url| java_ajax(url).unwrap_or_default())
+                    .collect()
+            }),
+        )?;
+        // P1: connect(url, header) - HTTP with custom headers
+        java_obj.set(
+            "connect",
+            Func::new(|url: String, header: String| -> String {
+                let header_json: JsonValue =
+                    serde_json::from_str(&header).unwrap_or(JsonValue::Null);
+                let method = reqwest::Method::GET;
+                let mut req = JS_HTTP_CLIENT.request(method, &url);
+                if let Some(obj) = header_json.as_object() {
+                    for (key, value) in obj {
+                        if let Some(v) = value.as_str() {
+                            req = req.header(key.as_str(), v);
+                        }
+                    }
+                }
+                req.send().and_then(|r| r.text()).unwrap_or_default()
+            }),
+        )?;
+        // P1: md5Encode16 - 16-char MD5
+        java_obj.set(
+            "md5Encode16",
+            Func::new(|input: String| -> String {
+                let hash = md5_hex(&input);
+                hash[..16].to_string()
+            }),
+        )?;
+        // P1: base64DecodeToByteArray - decode to base64 string (alias)
+        java_obj.set(
+            "base64DecodeToByteArray",
+            Func::new(|input: String| -> String {
+                base64::engine::general_purpose::STANDARD
+                    .decode(&input)
+                    .ok()
+                    .and_then(|bytes| String::from_utf8(bytes).ok())
+                    .unwrap_or_default()
+            }),
+        )?;
+        // P1: utf8ToGbk - encoding conversion stub (returns input as-is)
+        java_obj.set("utf8ToGbk", Func::new(|input: String| -> String { input }))?;
+        // P1: htmlFormat - HTML formatting stub
+        java_obj.set("htmlFormat", Func::new(|input: String| -> String { input }))?;
+        // P1: toast/log - logging
+        java_obj.set(
+            "toast",
+            Func::new(|msg: String| -> String {
+                tracing::info!("JS toast: {}", msg);
+                msg
+            }),
+        )?;
+        java_obj.set(
+            "log",
+            Func::new(|msg: String| -> String {
+                tracing::debug!("JS log: {}", msg);
+                msg
+            }),
+        )?;
+        // P1: getCookie - stub returning empty
+        let cookie_obj2 = Object::new(ctx.clone())?;
+        cookie_obj2.set(
+            "getCookie",
+            Func::new(|_tag: String, _key: String| -> String { String::new() }),
+        )?;
+        globals.set("cookie", cookie_obj2)?;
         globals.set("java", java_obj)?;
 
         globals.set(
