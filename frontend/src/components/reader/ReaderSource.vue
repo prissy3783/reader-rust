@@ -51,22 +51,19 @@
       >
         <div class="source-main">
           <div class="source-name-row">
-            <span class="source-name">{{ item.book.origin }}</span>
+            <span class="source-name">{{ getSourceDisplayName(item.book.origin) }}</span>
             <span class="source-tag" v-if="item.book.kind">{{ item.book.kind }}</span>
+            <span class="match-tag" :class="matchTagClass(item.matchType)">{{ item.matchType }}</span>
             <span v-if="item.latencyMs" class="source-latency" :class="latencyClass(item.latencyMs)">{{ formatLatency(item.latencyMs) }}</span>
             <span v-if="item.sameLatest" class="compare-badge good">最新章节一致</span>
             <span v-else-if="item.book.lastChapter" class="compare-badge">章节不同</span>
           </div>
+          <div class="source-url-small">{{ item.book.origin }}</div>
           <div class="source-book-name" v-if="item.book.name">{{ item.book.name }}</div>
           <div class="source-author">{{ item.book.author }}</div>
           <div class="source-intro" v-if="item.book.intro">{{ item.book.intro }}</div>
           <div class="source-chapter" v-if="item.book.lastChapter">最新: {{ item.book.lastChapter }}</div>
           <div class="source-update" v-if="item.book.updateTime">更新时间: {{ item.book.updateTime }}</div>
-          <div class="source-compare-line">
-            <span v-if="item.sameName" class="compare-text">书名匹配</span>
-            <span v-if="item.sameAuthor" class="compare-text">作者匹配</span>
-            <span v-if="item.chapterHint" class="compare-text strong">{{ item.chapterHint }}</span>
-          </div>
         </div>
         <div class="source-action">
           <button class="switch-btn" @click.stop="handleSwitch(item.book)">切换</button>
@@ -136,6 +133,7 @@ type CandidateItem = {
   chapterHint: string
   score: number
   latencyMs: number | null
+  matchType: string
 }
 
 const store = useReaderStore()
@@ -181,6 +179,28 @@ function formatLatency(ms: number): string {
   return (ms / 1000).toFixed(1) + 's'
 }
 
+function getSourceDisplayName(origin: string): string {
+  try {
+    const url = new URL(origin)
+    const host = url.hostname
+    // Extract meaningful name from hostname
+    const parts = host.replace(/^www\./, '').split('.')
+    if (parts.length >= 2) {
+      return parts[parts.length - 2]
+    }
+    return host
+  } catch {
+    return origin
+  }
+}
+
+function matchTagClass(matchType: string): string {
+  if (matchType === '精准匹配') return 'match-exact'
+  if (matchType === '书名相似') return 'match-similar'
+  if (matchType === '作者匹配') return 'match-author'
+  return 'match-weak'
+}
+
 const preparedResults = computed<CandidateItem[]>(() => {
   if (!store.book) return []
   const currentName = normalizeText(store.book.name)
@@ -195,11 +215,43 @@ const preparedResults = computed<CandidateItem[]>(() => {
       const chapterHint = sameLatest
         ? '可无缝续读'
         : (book.lastChapter ? `目标源最新：${book.lastChapter}` : '')
-      const score = (sameName ? 3 : 0) + (sameAuthor ? 3 : 0) + (sameLatest ? 4 : 0)
-      return { book, sameName, sameAuthor, sameLatest, chapterHint, score, latencyMs: book.latencyMs ?? null }
+      // Use backend score if available, otherwise compute locally
+      const score = book.score ?? computeLocalScore(book, currentName, currentAuthor, sameName, sameAuthor, sameLatest)
+      const matchType = book.matchType ?? (sameName ? '精准匹配' : sameAuthor ? '作者匹配' : '弱匹配')
+      return { book, sameName, sameAuthor, sameLatest, chapterHint, score, latencyMs: book.latencyMs ?? null, matchType }
     })
     .sort((a, b) => b.score - a.score)
 })
+
+function computeLocalScore(book: SearchBook, currentName: string, currentAuthor: string, sameName: boolean, sameAuthor: boolean, sameLatest: boolean): number {
+  let score = 0
+  if (sameName) score += 100
+  else {
+    const nameNoSpace = normalizeText(book.name).replace(/\s/g, '')
+    const targetNoSpace = currentName.replace(/\s/g, '')
+    if (nameNoSpace === targetNoSpace) score += 90
+    else if (normalizeText(book.name).includes(currentName) || currentName.includes(normalizeText(book.name))) score += 60
+    else {
+      const overlap = computeCharOverlap(normalizeText(book.name), currentName)
+      if (overlap >= 0.6) score += 60
+      else if (overlap >= 0.3) score += 20
+    }
+  }
+  if (sameAuthor) score += 50
+  else if (normalizeAuthorText(book.author) === currentAuthor) score += 40
+  if (sameLatest) score += 20
+  return score
+}
+
+function computeCharOverlap(a: string, b: string): number {
+  if (!a || !b) return 0
+  const aSet = new Set(a)
+  const bSet = new Set(b)
+  let intersection = 0
+  aSet.forEach(c => { if (bSet.has(c)) intersection++ })
+  const union = aSet.size + bSet.size - intersection
+  return union > 0 ? intersection / union : 0
+}
 
 onMounted(() => {
   startSearch()
@@ -518,6 +570,12 @@ async function handleSwitch(res: SearchBook) {
 .source-latency.fast { background: rgba(76, 175, 80, 0.12); color: #4CAF50; }
 .source-latency.medium { background: rgba(255, 193, 7, 0.12); color: #FFC107; }
 .source-latency.slow { background: rgba(244, 67, 54, 0.12); color: #F44336; }
+.source-url-small { font-size: 11px; opacity: 0.5; margin-top: 2px; }
+.match-tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; }
+.match-tag.match-exact { background: rgba(76, 175, 80, 0.15); color: #4CAF50; }
+.match-tag.match-similar { background: rgba(33, 150, 243, 0.15); color: #2196F3; }
+.match-tag.match-author { background: rgba(156, 39, 176, 0.15); color: #9C27B0; }
+.match-tag.match-weak { background: rgba(158, 158, 158, 0.15); color: #9E9E9E; }
 .source-name { font-weight: 600; font-size: 14px; }
 .source-tag { font-size: 10px; opacity: 0.5; border: 1px solid currentColor; padding: 0 3px; border-radius: 3px; }
 .compare-badge {

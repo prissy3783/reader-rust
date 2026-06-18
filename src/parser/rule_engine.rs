@@ -565,6 +565,7 @@ impl RuleEngine {
                 update_time,
                 word_count,
                 book_source_urls: None,
+                ..Default::default()
             });
         }
         out
@@ -615,6 +616,7 @@ impl RuleEngine {
                 update_time,
                 word_count,
                 book_source_urls: None,
+                ..Default::default()
             });
         }
         out
@@ -817,19 +819,20 @@ impl RuleEngine {
                 .as_ref()
                 .and_then(|r| eval_field_html(r, &el, base_url));
             let book_url_abs = resolve_url(base_url, &book_url);
-            let cover_url_abs = cover_url.map(|u| resolve_url(base_url, &u));
+            let cover_url_abs = cover_url.as_ref().map(|u| resolve_url(base_url, u));
             out.push(SearchBook {
                 name,
                 author,
-                book_url: book_url_abs,
+                book_url: resolve_url(base_url, &book_url),
                 origin: source.book_source_url.clone(),
-                cover_url: cover_url_abs,
+                cover_url,
                 intro,
                 kind,
                 last_chapter,
                 update_time,
                 word_count,
                 book_source_urls: None,
+                ..Default::default()
             });
         }
         out
@@ -880,6 +883,7 @@ impl RuleEngine {
                 update_time,
                 word_count,
                 book_source_urls: None,
+                ..Default::default()
             });
         }
 
@@ -928,6 +932,7 @@ impl RuleEngine {
                 update_time,
                 word_count,
                 book_source_urls: None,
+                ..Default::default()
             });
         }
         out
@@ -2154,6 +2159,7 @@ fn search_book_from_book(book: Book) -> Option<SearchBook> {
         update_time: book.update_time,
         word_count: book.word_count,
         book_source_urls: None,
+        ..Default::default()
     })
 }
 
@@ -2229,6 +2235,7 @@ fn build_search_book_from_json(
         update_time,
         word_count,
         book_source_urls: None,
+        ..Default::default()
     })
 }
 
