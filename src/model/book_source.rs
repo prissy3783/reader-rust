@@ -138,12 +138,40 @@ pub fn migrate_legacy_book_source_value(mut value: Value) -> Value {
     move_if_absent(obj, "enable", "enabled");
 
     if let Some(Value::String(kind)) = obj.get("bookSourceType").cloned() {
-        let mapped = if kind.eq_ignore_ascii_case("AUDIO") {
-            1
-        } else {
-            0
+        let mapped = match kind.as_str() {
+            "AUDIO" | "audio" | "1" => 1,
+            "IMAGE" | "image" | "2" => 2,
+            "FILE" | "file" | "3" => 3,
+            _ => 0,
         };
         obj.insert("bookSourceType".to_string(), json!(mapped));
+    }
+
+    // Auto-disable explore if no exploreUrl (hectorqin compatibility)
+    if let Some(url) = obj.get("exploreUrl").and_then(Value::as_str) {
+        if url.trim().is_empty() {
+            obj.insert("enabledExplore".to_string(), json!(false));
+        }
+    } else if !obj.contains_key("exploreUrl") || obj.get("exploreUrl").is_none() {
+        obj.insert("enabledExplore".to_string(), json!(false));
+    }
+
+    // loginUrl: handle Object type (extract "url" field)
+    if let Some(login) = obj.get("loginUrl").cloned() {
+        match login {
+            Value::Object(map) => {
+                if let Some(url_val) = map.get("url") {
+                    obj.insert("loginUrl".to_string(), url_val.clone());
+                }
+            }
+            Value::String(s) => {
+                obj.insert(
+                    "loginUrl".to_string(),
+                    Value::String(convert_legacy_url_rule(&s)),
+                );
+            }
+            _ => {}
+        }
     }
 
     if !obj.contains_key("header") {
@@ -310,6 +338,9 @@ fn convert_legacy_url_rule(raw: &str) -> String {
     url = url
         .replace("searchKey", "{{key}}")
         .replace("searchPage", "{{page}}");
+    // Handle searchPage(+1) and searchPage(-1) patterns
+    let re_page = regex::Regex::new(r"\{\{page([+-]\d+)\}\}").unwrap();
+    url = re_page.replace_all(&url, "{{page$1}}").into_owned();
     url = convert_legacy_page_braces(&url);
 
     if option.is_empty() {
@@ -348,4 +379,74 @@ fn extract_legacy_header(input: &str) -> Option<(usize, usize, String)> {
 fn convert_legacy_page_braces(input: &str) -> String {
     let re = regex::Regex::new(r"\{([^{}]*,[^{}]*)\}").unwrap();
     re.replace_all(input, "<$1>").into_owned()
+}
+
+/// Convert legacy rule syntax to new format (hectorqin compatibility)
+/// - `#正则#替换` → `##正则##替换`
+/// - `|` → `||` (list separator)
+/// - `&` → `&&` (list concat)
+/// - Preserves `-` (reverse) and `+` (all-in-one) prefixes
+pub fn convert_rule_syntax(rule: &str) -> String {
+    if rule.is_empty() {
+        return rule.to_string();
+    }
+    let mut new_rule = rule.to_string();
+    let mut reverse = false;
+    let mut allinone = false;
+
+    if new_rule.starts_with('-') {
+        reverse = true;
+        new_rule = new_rule[1..].to_string();
+    }
+    if new_rule.starts_with('+') {
+        allinone = true;
+        new_rule = new_rule[1..].to_string();
+    }
+
+    // Only convert if not already in new format
+    if !new_rule.starts_with("@css:")
+        && !new_rule.starts_with("@xpath:")
+        && !new_rule.starts_with("//")
+        && !new_rule.starts_with("##")
+        && !new_rule.starts_with(':')
+        && !new_rule.contains("@js:")
+        && !new_rule.contains("<js>")
+    {
+        // # → ##
+        if new_rule.contains('#') && !new_rule.contains("##") {
+            new_rule = new_rule.replace('#', "##");
+        }
+        // | → ||
+        if new_rule.contains('|') && !new_rule.contains("||") {
+            if new_rule.contains("##") {
+                let parts: Vec<&str> = new_rule.split("##").collect();
+                if parts[0].contains('|') {
+                    let mut result = parts[0].replace('|', "||");
+                    for part in parts.iter().skip(1) {
+                        result.push_str("##");
+                        result.push_str(part);
+                    }
+                    new_rule = result;
+                }
+            } else {
+                new_rule = new_rule.replace('|', "||");
+            }
+        }
+        // & → &&
+        if new_rule.contains('&')
+            && !new_rule.contains("&&")
+            && !new_rule.contains("http")
+            && !new_rule.starts_with('/')
+        {
+            new_rule = new_rule.replace('&', "&&");
+        }
+    }
+
+    if allinone {
+        new_rule = format!("+{}", new_rule);
+    }
+    if reverse {
+        new_rule = format!("-{}", new_rule);
+    }
+    new_rule
 }
