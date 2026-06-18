@@ -354,31 +354,7 @@ impl RuleEngine {
                     }
                 };
 
-                tracing::debug!(
-                    "[ContentDebug] extracted content len={}, is_catalog={}",
-                    content.len(),
-                    crate::service::catalog::is_catalog_like(&content)
-                );
-
-                // Fallback: if content looks like a TOC, try ownText extraction
-                if !content.is_empty() && crate::service::catalog::is_catalog_like(&content) {
-                    tracing::debug!("[ContentDebug] catalog detected, trying ownText fallback");
-                    if let Some(rule_str) = rule.content.as_deref() {
-                        let doc = html::parse_document(&content_body);
-                        let alt_rule = ensure_extractor_suffix(rule_str, "ownText");
-                        if let Some(alt) = html::select_all_text(&doc, &alt_rule) {
-                            if !alt.is_empty() && !crate::service::catalog::is_catalog_like(&alt) {
-                                tracing::debug!(
-                                    "[ContentDebug] ownText fallback succeeded: len={}",
-                                    alt.len()
-                                );
-                                content = alt;
-                            } else {
-                                tracing::debug!("[ContentDebug] ownText fallback still looks like catalog or empty");
-                            }
-                        }
-                    }
-                }
+                tracing::debug!("[ContentDebug] extracted content len={}", content.len());
 
                 if let Some(replace) = rule.replace_regex.as_deref() {
                     let before_len = content.len();
@@ -389,25 +365,6 @@ impl RuleEngine {
                         content.len()
                     );
                 }
-
-                // HTML cleanup: remove script/style/ads, preserve img tags
-                if content.contains('<') && !content.trim().is_empty() {
-                    let before_len = content.len();
-                    content = crate::parser::html_clean::format_keep_img(&content, base_url);
-                    tracing::debug!(
-                        "[ContentDebug] htmlClean: before_len={}, after_len={}",
-                        before_len,
-                        content.len()
-                    );
-                }
-
-                // Content quality analysis
-                let quality = crate::service::content_quality::analyze_content_quality(&content);
-                tracing::debug!(
-                    "[ContentDebug] content_quality={:?} ({})",
-                    quality,
-                    quality.label()
-                );
 
                 tracing::debug!(
                     "[ContentDebug] final content len={}, empty={}",
