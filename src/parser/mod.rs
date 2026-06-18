@@ -1,4 +1,5 @@
 pub mod html;
+pub mod html_clean;
 pub mod js;
 pub mod jsonpath;
 pub mod rule_analyzer;

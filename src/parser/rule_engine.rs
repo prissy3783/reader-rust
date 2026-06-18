@@ -262,19 +262,38 @@ impl RuleEngine {
             let rule = source.rule_content.clone().unwrap_or_default();
             let mut content_body = body.to_string();
 
+            // DEBUG: 输出正文规则原始内容
+            tracing::debug!(
+                "[ContentDebug] base_url={}, html_len={}, content_rule={:?}, source_regex={:?}, web_js={:?}",
+                base_url, body.len(), rule.content, rule.source_regex, rule.web_js
+            );
+
             if let Some(source_regex) = rule
                 .source_regex
                 .as_deref()
                 .filter(|s| !s.trim().is_empty())
             {
+                let before_len = content_body.len();
                 content_body = apply_legado_regex(&content_body, source_regex);
+                tracing::debug!(
+                    "[ContentDebug] sourceRegex applied: before_len={}, after_len={}",
+                    before_len,
+                    content_body.len()
+                );
             }
             if let Some(web_js) = rule.web_js.as_deref().filter(|s| !s.trim().is_empty()) {
                 if let Ok(processed) =
                     eval_js(self.strip_mode_prefix(web_js), &content_body, base_url)
                 {
                     if !processed.trim().is_empty() {
+                        tracing::debug!(
+                            "[ContentDebug] webJs processed: before_len={}, after_len={}",
+                            content_body.len(),
+                            processed.len()
+                        );
                         content_body = processed;
+                    } else {
+                        tracing::debug!("[ContentDebug] webJs returned empty, keeping original");
                     }
                 }
             }
@@ -285,7 +304,9 @@ impl RuleEngine {
                     ParseMode::Js
                 ) {
                     let script = self.strip_mode_prefix(&content_rule);
+                    tracing::debug!("[ContentDebug] JS mode, evaluating script");
                     if let Ok(res) = eval_js(script, &content_body, base_url) {
+                        tracing::debug!("[ContentDebug] JS result len={}", res.len());
                         return res;
                     }
                 }
@@ -293,6 +314,12 @@ impl RuleEngine {
                 let content_rule = self.process_inline_js(&content_rule, &content_body, base_url);
 
                 let mode = self.detect_mode(&content_rule, &content_body);
+                tracing::debug!(
+                    "[ContentDebug] mode={:?}, rule={}",
+                    mode,
+                    self.strip_mode_prefix(&content_rule)
+                );
+
                 let mut content = match mode {
                     ParseMode::JsonPath => {
                         if let Ok(v) = serde_json::from_str::<Value>(&content_body) {
@@ -302,43 +329,87 @@ impl RuleEngine {
                             )
                             .unwrap_or_default()
                         } else {
+                            tracing::debug!("[ContentDebug] JsonPath: body is not valid JSON");
                             String::new()
                         }
                     }
                     ParseMode::XPath => {
-                        html::select_xpath(&content_body, self.strip_mode_prefix(&content_rule))
-                            .first()
-                            .cloned()
-                            .unwrap_or_default()
+                        let results = html::select_xpath(
+                            &content_body,
+                            self.strip_mode_prefix(&content_rule),
+                        );
+                        tracing::debug!("[ContentDebug] XPath: matched {} nodes", results.len());
+                        results.first().cloned().unwrap_or_default()
                     }
                     _ => {
                         let doc = html::parse_document(&content_body);
-                        let result =
-                            html::select_all_text(&doc, self.strip_mode_prefix(&content_rule));
+                        let selector = self.strip_mode_prefix(&content_rule);
+                        let result = html::select_all_text(&doc, selector);
+                        tracing::debug!(
+                            "[ContentDebug] CSS selector='{}', extracted_len={}",
+                            selector,
+                            result.as_deref().map(|s| s.len()).unwrap_or(0)
+                        );
                         result.unwrap_or_default()
                     }
                 };
 
+                tracing::debug!(
+                    "[ContentDebug] extracted content len={}, is_catalog={}",
+                    content.len(),
+                    crate::service::catalog::is_catalog_like(&content)
+                );
+
                 // Fallback: if content looks like a TOC, try ownText extraction
                 if !content.is_empty() && crate::service::catalog::is_catalog_like(&content) {
+                    tracing::debug!("[ContentDebug] catalog detected, trying ownText fallback");
                     if let Some(rule_str) = rule.content.as_deref() {
                         let doc = html::parse_document(&content_body);
                         let alt_rule = ensure_extractor_suffix(rule_str, "ownText");
                         if let Some(alt) = html::select_all_text(&doc, &alt_rule) {
                             if !alt.is_empty() && !crate::service::catalog::is_catalog_like(&alt) {
+                                tracing::debug!(
+                                    "[ContentDebug] ownText fallback succeeded: len={}",
+                                    alt.len()
+                                );
                                 content = alt;
+                            } else {
+                                tracing::debug!("[ContentDebug] ownText fallback still looks like catalog or empty");
                             }
                         }
                     }
                 }
 
                 if let Some(replace) = rule.replace_regex.as_deref() {
+                    let before_len = content.len();
                     content = apply_legado_regex(&content, replace);
+                    tracing::debug!(
+                        "[ContentDebug] replaceRegex: before_len={}, after_len={}",
+                        before_len,
+                        content.len()
+                    );
                 }
 
+                // HTML cleanup: remove script/style/ads, preserve img tags
+                if content.contains('<') && !content.trim().is_empty() {
+                    let before_len = content.len();
+                    content = crate::parser::html_clean::format_keep_img(&content, base_url);
+                    tracing::debug!(
+                        "[ContentDebug] htmlClean: before_len={}, after_len={}",
+                        before_len,
+                        content.len()
+                    );
+                }
+
+                tracing::debug!(
+                    "[ContentDebug] final content len={}, empty={}",
+                    content.len(),
+                    content.trim().is_empty()
+                );
                 return content;
             }
 
+            tracing::debug!("[ContentDebug] no content rule, returning empty");
             String::new()
         })
     }

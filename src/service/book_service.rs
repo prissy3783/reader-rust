@@ -752,64 +752,87 @@ impl BookService {
     ) -> Result<String, AppError> {
         let book_key = md5_hex(book_url);
         tracing::debug!(
-            "get_content called, chapter_url={}, book_key={}",
+            "[ContentDebug] get_content called, chapter_url={}, book_key={}, source={}",
             chapter_url,
-            book_key
+            book_key,
+            source.book_source_name
         );
         if let Ok(Some(cached)) = self.cache.get(user_ns, &book_key, chapter_url).await {
-            tracing::debug!("get_content returning cached content, len={}", cached.len());
+            tracing::debug!("[ContentDebug] cache HIT, len={}", cached.len());
             return Ok(cached);
         }
-        tracing::debug!("get_content cache miss, fetching from network");
+        tracing::debug!("[ContentDebug] cache MISS, fetching from network");
 
         let mut all_content = String::new();
         let mut visited_urls = std::collections::HashSet::new();
         let mut current_url = chapter_url.to_string();
 
-        // Follow pagination to get all content pages
         loop {
             if visited_urls.contains(&current_url) {
-                tracing::debug!("get_content detected loop, breaking");
+                tracing::debug!("[ContentDebug] loop detected, breaking");
                 break;
             }
             visited_urls.insert(current_url.clone());
 
-            tracing::debug!("get_content fetching: {}", current_url);
+            tracing::debug!("[ContentDebug] fetching: {}", current_url);
+            let start = std::time::Instant::now();
             let res = self
                 .fetch_source_url(user_ns, source, &current_url, &source.book_source_url)
-                .await?;
-            tracing::debug!("get_content fetch done, body len={}", res.body.len());
-            let content = self.parser.content(source, &res.body, &res.url);
-            tracing::debug!("get_content parsed content len={}", content.len());
+                .await;
+            let elapsed = start.elapsed().as_millis();
+            match &res {
+                Ok(r) => {
+                    tracing::debug!(
+                        "[ContentDebug] fetch OK: status={}, redirect_url={}, html_len={}, elapsed={}ms",
+                        r.status, r.url, r.body.len(), elapsed
+                    );
+                    let content = self.parser.content(source, &r.body, &r.url);
+                    tracing::debug!(
+                        "[ContentDebug] parsed content len={}, empty={}",
+                        content.len(),
+                        content.trim().is_empty()
+                    );
 
-            if !content.is_empty() {
-                if !all_content.is_empty() {
-                    all_content.push('\n');
+                    if !content.is_empty() {
+                        if !all_content.is_empty() {
+                            all_content.push('\n');
+                        }
+                        all_content.push_str(&content);
+                    }
+
+                    if let Some(next_url) = self.parser.next_content_url(source, &r.body, &r.url) {
+                        tracing::debug!("[ContentDebug] nextContentUrl={}", next_url);
+                        if should_follow_content_page(chapter_url, &current_url, &next_url) {
+                            current_url = next_url;
+                        } else {
+                            tracing::debug!(
+                                "[ContentDebug] next_url is different chapter, stopping"
+                            );
+                            break;
+                        }
+                    } else {
+                        tracing::debug!("[ContentDebug] no nextContentUrl, done");
+                        break;
+                    }
                 }
-                all_content.push_str(&content);
-            }
-
-            // Check for next page
-            if let Some(next_url) = self.parser.next_content_url(source, &res.body, &res.url) {
-                tracing::debug!("get_content found next_url: {}", next_url);
-                if should_follow_content_page(chapter_url, &current_url, &next_url) {
-                    current_url = next_url;
-                } else {
-                    tracing::debug!("get_content next_url appears to be next chapter, stopping");
+                Err(e) => {
+                    tracing::debug!("[ContentDebug] fetch FAILED after {}ms: {:?}", elapsed, e);
                     break;
                 }
-            } else {
-                tracing::debug!("get_content no more pages");
-                break;
             }
         }
 
-        tracing::debug!("get_content final content len={}", all_content.len());
+        tracing::debug!(
+            "[ContentDebug] final: total_len={}, empty={}",
+            all_content.len(),
+            all_content.trim().is_empty()
+        );
         if !all_content.is_empty() {
             let _ = self
                 .cache
                 .put(user_ns, &book_key, chapter_url, &all_content)
                 .await;
+            tracing::debug!("[ContentDebug] cached result");
         }
         Ok(all_content)
     }

@@ -881,6 +881,12 @@ pub async fn get_book_content(
         .get_content(&user_ns, &book_url, &source, &chapter_url)
         .await?;
 
+    if content.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "章节内容为空，请检查书源规则或切换书源".to_string(),
+        ));
+    }
+
     // Save progress to WebDAV (hectorqin compatibility)
     if let Ok(Some(shelf_book)) = state.book_service.get_shelf_book(&user_ns, &book_url).await {
         let chapter_index = req.index.unwrap_or(0);
