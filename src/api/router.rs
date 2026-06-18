@@ -37,6 +37,7 @@ pub fn build_router(state: AppState) -> Router {
             "/reader3/testBookSources",
             post(handlers::test_book_sources),
         )
+        .route("/reader3/proxyImage", get(handlers::proxy_image))
         .route(
             "/reader3/getBookSourceHealth",
             get(handlers::get_book_source_health),

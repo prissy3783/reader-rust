@@ -68,6 +68,19 @@ pub struct BookSourceAvailability {
     pub explore_latency_ms: u64,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FullChainResult {
+    pub search_ok: bool,
+    pub search_latency: u64,
+    pub info_ok: bool,
+    pub toc_ok: bool,
+    pub chapter_count: usize,
+    pub content_ok: bool,
+    pub total_latency: u64,
+    pub error: Option<String>,
+}
+
 impl BookService {
     pub fn new(http: HttpClient, parser: RuleEngine, cache: FileCache, storage_dir: &str) -> Self {
         let storage_dir = PathBuf::from(storage_dir);
@@ -366,6 +379,93 @@ impl BookService {
             explore_error,
             search_latency_ms,
             explore_latency_ms,
+        }
+    }
+
+    pub async fn test_book_source_full_chain(
+        &self,
+        user_ns: &str,
+        source: &BookSource,
+        keyword: &str,
+    ) -> FullChainResult {
+        let total_start = std::time::Instant::now();
+
+        // Step 1: 搜索
+        let search_start = std::time::Instant::now();
+        let search_result = self.search_book(user_ns, source, keyword, 1).await;
+        let search_latency = search_start.elapsed().as_millis() as u64;
+        let search_ok = search_result
+            .as_ref()
+            .map(|l| !l.is_empty())
+            .unwrap_or(false);
+
+        if !search_ok {
+            return FullChainResult {
+                search_ok: false,
+                search_latency,
+                info_ok: false,
+                toc_ok: false,
+                chapter_count: 0,
+                content_ok: false,
+                total_latency: total_start.elapsed().as_millis() as u64,
+                error: search_result.err().map(|e| format!("{e:?}")),
+            };
+        }
+
+        let book_url = search_result.unwrap()[0].book_url.clone();
+
+        // Step 2: 获取书籍信息
+        let info_start = std::time::Instant::now();
+        let info_result = self.get_book_info(user_ns, source, &book_url).await;
+        let info_ok = info_result.is_ok();
+        let _info_latency = info_start.elapsed().as_millis() as u64;
+
+        // Step 3: 获取目录
+        let toc_start = std::time::Instant::now();
+        let toc_result = self
+            .get_chapter_list_with_cache(user_ns, source, &book_url, false)
+            .await;
+        let toc_latency = toc_start.elapsed().as_millis() as u64;
+        let (toc_ok, chapter_count) = match &toc_result {
+            Ok(chapters) => (!chapters.is_empty(), chapters.len()),
+            Err(_) => (false, 0),
+        };
+
+        // Step 4: 获取正文（第一个非卷章节）
+        let content_ok = if let Ok(chapters) = &toc_result {
+            if let Some(chapter) = chapters.iter().find(|c| !c.is_volume) {
+                let content_start = std::time::Instant::now();
+                let content = self
+                    .get_content(user_ns, &book_url, source, &chapter.url)
+                    .await;
+                let _content_latency = content_start.elapsed().as_millis() as u64;
+                content
+                    .as_ref()
+                    .map(|c| !c.trim().is_empty())
+                    .unwrap_or(false)
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        let total_latency = total_start.elapsed().as_millis() as u64;
+
+        tracing::debug!(
+            "[SourceCheck] source={}, search={} ({}ms), info={}, toc={} ({} chapters), content={}, total={}ms",
+            source.book_source_name, search_ok, search_latency, info_ok, toc_ok, chapter_count, content_ok, total_latency
+        );
+
+        FullChainResult {
+            search_ok,
+            search_latency,
+            info_ok,
+            toc_ok,
+            chapter_count,
+            content_ok,
+            total_latency,
+            error: None,
         }
     }
 

@@ -3228,3 +3228,62 @@ mod tests {
         assert_eq!(seen.len(), 5);
     }
 }
+
+// ==================== 图片代理缓存 ====================
+
+#[derive(serde::Deserialize)]
+pub struct ProxyImageRequest {
+    pub url: String,
+}
+
+pub async fn proxy_image(
+    State(state): State<AppState>,
+    Query(q): Query<ProxyImageRequest>,
+) -> Result<Response, AppError> {
+    use crate::crawler::url_analyzer::analyze_url;
+    use crate::model::book_source::BookSource;
+
+    let url = q.url;
+    if url.trim().is_empty() {
+        return Err(AppError::BadRequest("url required".to_string()));
+    }
+
+    let cache_key = crate::util::hash::md5_hex(&url);
+    let cache_dir = std::path::PathBuf::from("/tmp/reader-rust-cache/images");
+    let cache_path = cache_dir.join(format!("{}.img", cache_key));
+
+    // Check cache
+    if cache_path.exists() {
+        if let Ok(data) = tokio::fs::read(&cache_path).await {
+            let mut response = Response::new(axum::body::Body::from(data));
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, "max-age=86400".parse().unwrap());
+            return Ok(response);
+        }
+    }
+
+    // Download image via reqwest
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    if !resp.status().is_success() {
+        return Err(AppError::BadRequest(format!("HTTP {}", resp.status())));
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    // Cache to disk
+    let _ = tokio::fs::create_dir_all(&cache_dir).await;
+    let _ = tokio::fs::write(&cache_path, &bytes).await;
+
+    let mut response = Response::new(axum::body::Body::from(bytes.to_vec()));
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, "max-age=86400".parse().unwrap());
+    Ok(response)
+}

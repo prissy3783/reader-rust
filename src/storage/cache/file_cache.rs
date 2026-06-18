@@ -15,6 +15,7 @@ impl FileCache {
     }
 
     /// Get cached content for a specific book
+    /// Returns None if cache is expired (24h) or doesn't exist
     pub async fn get(
         &self,
         user_ns: &str,
@@ -24,6 +25,23 @@ impl FileCache {
         let path = self.chapter_path(user_ns, book_key, chapter_key);
         if !path.exists() {
             return Ok(None);
+        }
+        // Check if cache is expired (24 hours)
+        if let Ok(metadata) = fs::metadata(&path).await {
+            if let Ok(modified) = metadata.modified() {
+                let age = std::time::SystemTime::now()
+                    .duration_since(modified)
+                    .unwrap_or_default();
+                if age.as_secs() > 24 * 60 * 60 {
+                    tracing::debug!(
+                        "cache expired for {}:{} (age={:?})",
+                        book_key,
+                        chapter_key,
+                        age
+                    );
+                    return Ok(None);
+                }
+            }
         }
         let data = fs::read_to_string(path).await?;
         Ok(Some(data))
