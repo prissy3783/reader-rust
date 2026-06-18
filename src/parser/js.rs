@@ -163,6 +163,23 @@ fn eval_js_inner_with_source(
             "removeCookie",
             Func::new(|_key: String| -> String { "".to_string() }),
         )?;
+        cookie_obj.set(
+            "getCookie",
+            Func::new(|tag: String, key: String| -> String {
+                let map = JS_KV.lock().unwrap_or_else(|e| e.into_inner());
+                let cookie_key = format!("cookie:{}:{}", tag, key);
+                map.get(&cookie_key).cloned().unwrap_or_default()
+            }),
+        )?;
+        cookie_obj.set(
+            "setCookie",
+            Func::new(|tag: String, key: String, value: String| -> bool {
+                let mut map = JS_KV.lock().unwrap_or_else(|e| e.into_inner());
+                let cookie_key = format!("cookie:{}:{}", tag, key);
+                map.insert(cookie_key, value);
+                true
+            }),
+        )?;
         globals.set("cookie", cookie_obj)?;
 
         let cache_obj = Object::new(ctx.clone())?;
@@ -340,13 +357,21 @@ fn eval_js_inner_with_source(
                 msg
             }),
         )?;
-        // P1: getCookie - stub returning empty
-        let cookie_obj2 = Object::new(ctx.clone())?;
-        cookie_obj2.set(
-            "getCookie",
-            Func::new(|_tag: String, _key: String| -> String { String::new() }),
+        // P2: importScript - import JS from URL or inline
+        java_obj.set(
+            "importScript",
+            Func::new(|path: String| -> String {
+                if path.starts_with("http://") || path.starts_with("https://") {
+                    JS_HTTP_CLIENT
+                        .get(&path)
+                        .send()
+                        .and_then(|r| r.text())
+                        .unwrap_or_default()
+                } else {
+                    path
+                }
+            }),
         )?;
-        globals.set("cookie", cookie_obj2)?;
         globals.set("java", java_obj)?;
 
         globals.set(
