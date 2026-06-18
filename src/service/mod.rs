@@ -4,6 +4,7 @@ pub mod book_group_service;
 pub mod book_service;
 pub mod book_source_service;
 pub mod catalog;
+pub mod content_quality;
 pub mod health;
 pub mod json_document_service;
 pub mod local_epub_book;

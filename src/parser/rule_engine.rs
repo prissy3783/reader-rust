@@ -401,6 +401,14 @@ impl RuleEngine {
                     );
                 }
 
+                // Content quality analysis
+                let quality = crate::service::content_quality::analyze_content_quality(&content);
+                tracing::debug!(
+                    "[ContentDebug] content_quality={:?} ({})",
+                    quality,
+                    quality.label()
+                );
+
                 tracing::debug!(
                     "[ContentDebug] final content len={}, empty={}",
                     content.len(),
