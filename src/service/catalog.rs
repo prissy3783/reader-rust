@@ -1,5 +1,9 @@
 pub fn is_catalog_like(text: &str) -> bool {
-    if text.is_empty() {
+    if text.trim().is_empty() {
+        return false;
+    }
+    // Long content is almost certainly not a catalog
+    if text.len() > 500 {
         return false;
     }
     let lines: Vec<&str> = text.lines().collect();
@@ -35,7 +39,8 @@ pub fn is_catalog_like(text: &str) -> bool {
     let title_density = pattern_matches as f64 / total_lines as f64;
     let short_ratio = short_lines as f64 / total_lines as f64;
 
-    title_density > 0.15 || short_ratio > 0.7
+    // Higher thresholds to reduce false positives
+    title_density > 0.3 || short_ratio > 0.85
 }
 
 #[cfg(test)]

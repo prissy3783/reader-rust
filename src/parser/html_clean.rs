@@ -8,25 +8,13 @@ pub fn format_keep_img(html: &str, _base_url: &str) -> String {
 
     let mut result = html.to_string();
 
-    // Remove <script>...</script> tags (including content)
+    // Remove <script>...</script> tags (only matched pairs, not unclosed)
     let re_script = regex::Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap();
     result = re_script.replace_all(&result, "").to_string();
 
-    // Remove <style>...</style> tags (including content)
+    // Remove <style>...</style> tags (only matched pairs)
     let re_style = regex::Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap();
     result = re_style.replace_all(&result, "").to_string();
-
-    // Convert <br> and <br/> to newlines
-    let re_br = regex::Regex::new(r"(?i)<br\s*/?\s*>").unwrap();
-    result = re_br.replace_all(&result, "\n").to_string();
-
-    // Convert </p> to newlines
-    let re_p = regex::Regex::new(r"(?is)</p>").unwrap();
-    result = re_p.replace_all(&result, "\n").to_string();
-
-    // Convert </div> to newlines
-    let re_div = regex::Regex::new(r"(?is)</div>").unwrap();
-    result = re_div.replace_all(&result, "\n").to_string();
 
     // Protect <img> tags with placeholders before stripping other tags
     let mut img_map = std::collections::HashMap::new();
