@@ -61,6 +61,9 @@ struct TestBookSourceItem {
     explore_error: Option<String>,
     marked_invalid: bool,
     group: Option<String>,
+    search_latency_ms: u64,
+    explore_latency_ms: u64,
+    total_latency_ms: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -280,11 +283,31 @@ pub async fn test_book_sources(
         } else {
             false
         };
-        if changed {
-            state
+
+        let total_latency = availability.search_latency_ms + availability.explore_latency_ms;
+        source.latency_ms = Some(total_latency as i64);
+        source.last_check_time = Some(crate::util::time::now_ts());
+        if !availability.valid {
+            source.consecutive_failures = Some(source.consecutive_failures.unwrap_or(0) + 1);
+        } else {
+            source.consecutive_failures = Some(0);
+        }
+
+        let health = crate::service::health::SourceHealth {
+            level: 0,
+            latency_ms: total_latency as i64,
+            search_ok: availability.search_ok,
+            toc_ok: source.rule_toc.is_some(),
+            content_ok: source.rule_content.is_some(),
+            consecutive_failures: source.consecutive_failures.unwrap_or(0) as i32,
+        };
+        source.health_level = Some(health.compute_level() as i64);
+
+        if changed || total_latency > 0 {
+            let _ = state
                 .book_source_service
                 .save(&user_ns, source.clone())
-                .await?;
+                .await;
             if !availability.valid {
                 marked_invalid += 1;
             }
@@ -302,6 +325,9 @@ pub async fn test_book_sources(
             explore_error: availability.explore_error,
             marked_invalid: changed && !availability.valid,
             group: source.book_source_group,
+            search_latency_ms: availability.search_latency_ms,
+            explore_latency_ms: availability.explore_latency_ms,
+            total_latency_ms: availability.search_latency_ms + availability.explore_latency_ms,
         });
     }
 

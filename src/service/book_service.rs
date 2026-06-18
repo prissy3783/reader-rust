@@ -64,6 +64,8 @@ pub struct BookSourceAvailability {
     pub explore_url: Option<String>,
     pub search_error: Option<String>,
     pub explore_error: Option<String>,
+    pub search_latency_ms: u64,
+    pub explore_latency_ms: u64,
 }
 
 impl BookService {
@@ -311,18 +313,25 @@ impl BookService {
             .unwrap_or("斗破苍穹")
             .to_string();
 
-        let (search_ok, search_error) = if source
+        let (search_ok, search_error, search_latency_ms) = if source
             .search_url
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty())
             && source.rule_search.is_some()
         {
-            match self.search_book(user_ns, source, &keyword, 1).await {
-                Ok(books) => (!books.is_empty(), None),
-                Err(err) => (false, Some(format!("{err:?}"))),
+            let start = Instant::now();
+            let result = self.search_book(user_ns, source, &keyword, 1).await;
+            let latency = start.elapsed().as_millis() as u64;
+            match result {
+                Ok(books) => (!books.is_empty(), None, latency),
+                Err(err) => (false, Some(format!("{err:?}")), latency),
             }
         } else {
-            (false, Some("missing searchUrl or ruleSearch".to_string()))
+            (
+                false,
+                Some("missing searchUrl or ruleSearch".to_string()),
+                0,
+            )
         };
 
         let explore_url = self.explore_kinds(source).ok().and_then(|kinds| {
@@ -332,14 +341,18 @@ impl BookService {
                 .map(|url| url.trim().to_string())
                 .find(|url| !url.is_empty())
         });
-        let (explore_ok, explore_error) = if let Some(url) = explore_url.as_deref() {
-            match self.explore_book(user_ns, source, url, 1).await {
-                Ok(books) => (!books.is_empty(), None),
-                Err(err) => (false, Some(format!("{err:?}"))),
-            }
-        } else {
-            (false, Some("missing explore category url".to_string()))
-        };
+        let (explore_ok, explore_error, explore_latency_ms) =
+            if let Some(url) = explore_url.as_deref() {
+                let start = Instant::now();
+                let result = self.explore_book(user_ns, source, url, 1).await;
+                let latency = start.elapsed().as_millis() as u64;
+                match result {
+                    Ok(books) => (!books.is_empty(), None, latency),
+                    Err(err) => (false, Some(format!("{err:?}")), latency),
+                }
+            } else {
+                (false, Some("missing explore category url".to_string()), 0)
+            };
 
         BookSourceAvailability {
             book_source_url: source.book_source_url.clone(),
@@ -351,6 +364,8 @@ impl BookService {
             explore_url,
             search_error,
             explore_error,
+            search_latency_ms,
+            explore_latency_ms,
         }
     }
 
