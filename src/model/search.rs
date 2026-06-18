@@ -16,6 +16,9 @@ pub struct SearchBook {
     /// Book source URLs for the same book from different sources (for merged results)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub book_source_urls: Option<Vec<String>>,
+    /// Book source display name (e.g. "望书阁")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub book_source_name: Option<String>,
     /// Search relevance score (computed by frontend)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,

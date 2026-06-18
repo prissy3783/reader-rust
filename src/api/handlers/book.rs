@@ -2131,9 +2131,14 @@ pub async fn search_book_source_sse(
 
             if let Some(res) = tasks.next().await {
                 if let Ok((cur_idx, Ok(list), target_name, target_author)) = res {
+                    let source_name = sources
+                        .get(cur_idx as usize)
+                        .map(|s| s.book_source_name.clone())
+                        .unwrap_or_default();
                     let mut batch = Vec::new();
-                    for b in list {
+                    for mut b in list {
                         if b.name == target_name && b.author == target_author {
+                            b.book_source_name = Some(source_name.clone());
                             batch.push(b);
                         }
                     }

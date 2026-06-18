@@ -51,7 +51,7 @@
       >
         <div class="source-main">
           <div class="source-name-row">
-            <span class="source-name">{{ getSourceDisplayName(item.book.origin) }}</span>
+            <span class="source-name">{{ item.book.bookSourceName || getSourceDisplayName(item.book.origin) }}</span>
             <span class="source-tag" v-if="item.book.kind">{{ item.book.kind }}</span>
             <span class="match-tag" :class="matchTagClass(item.matchType)">{{ item.matchType }}</span>
             <span v-if="item.latencyMs" class="source-latency" :class="latencyClass(item.latencyMs)">{{ formatLatency(item.latencyMs) }}</span>
