@@ -624,49 +624,96 @@ pub fn select_all_text(doc: &Html, rule: &str) -> Option<String> {
         return None;
     }
 
-    let first_part = parts[0].trim();
-    let roots = collect_matches(doc, &parse_selector_with_index(first_part));
-    if roots.is_empty() {
-        return None;
-    }
-
-    if parts.len() > 1 {
-        let mut all_texts = Vec::new();
-        let sub_rule = parts[1..].join("@");
-
-        for root in roots {
-            let last_part = sub_rule.trim();
-            if let Some(text) = extract_text(&root, last_part) {
-                if !text.is_empty() {
-                    all_texts.push(text);
-                }
-                continue;
-            }
-
-            let parsed = parse_selector_with_index(sub_rule.trim());
-            for el in collect_matches_from_element(root, &parsed) {
-                if let Some(text) = extract_text(&el, "text") {
-                    if !text.is_empty() {
-                        all_texts.push(text);
-                    }
-                }
-            }
-        }
-
-        if all_texts.is_empty() {
+    // Single part: no chain, use textNodes extraction on matched elements
+    if parts.len() == 1 {
+        let selector = parts[0].trim();
+        let roots = collect_matches(doc, &parse_selector_with_index(selector));
+        if roots.is_empty() {
             return None;
         }
-        return Some(all_texts.join("\n"));
+        let mut texts = Vec::new();
+        for root in roots {
+            if let Some(text) = extract_text(&root, "textNodes") {
+                if !text.is_empty() {
+                    texts.push(text);
+                }
+            }
+        }
+        if texts.is_empty() {
+            return None;
+        }
+        return Some(texts.join("\n"));
     }
 
+    // Multi-part chain: follow DOM step by step like select_list
+    // Last part is the text extractor, preceding parts are CSS selectors
+    let extractor_part = parts.last().unwrap().trim();
+    let selector_parts = &parts[..parts.len() - 1];
+
+    // Determine if the last part is a known text extractor or a CSS selector
+    let is_extractor = matches!(
+        extractor_part,
+        "text"
+            | "@text"
+            | "textNodes"
+            | "@textNodes"
+            | "ownText"
+            | "@ownText"
+            | "html"
+            | "@html"
+            | "all"
+            | "@all"
+    ) || extractor_part.starts_with("@attr[")
+        || extractor_part.starts_with("attr[");
+
+    // Navigate the @ chain for selector parts
+    let mut current_matches: Vec<ElementRef> = vec![];
+    for (i, part) in selector_parts.iter().enumerate() {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let parsed = parse_selector_with_index(part);
+        if i == 0 {
+            current_matches = collect_matches(doc, &parsed);
+        } else {
+            let mut next_matches = Vec::new();
+            for current in &current_matches {
+                next_matches.extend(collect_matches_from_element(*current, &parsed));
+            }
+            current_matches = next_matches;
+        }
+        if current_matches.is_empty() {
+            return None;
+        }
+    }
+
+    // Apply text extraction on the final matches
     let mut texts = Vec::new();
-    for root in roots {
-        if let Some(text) = extract_text(&root, "textNodes") {
-            if !text.is_empty() {
-                texts.push(text);
+    if is_extractor {
+        for el in &current_matches {
+            if let Some(text) = extract_text(el, extractor_part) {
+                if !text.is_empty() {
+                    texts.push(text);
+                }
+            }
+        }
+    } else {
+        // Last part is also a CSS selector (e.g., .article@div@span)
+        let parsed = parse_selector_with_index(extractor_part);
+        let mut final_matches = Vec::new();
+        for current in &current_matches {
+            final_matches.extend(collect_matches_from_element(*current, &parsed));
+        }
+        for el in &final_matches {
+            if let Some(text) = extract_text(el, "text") {
+                if !text.is_empty() {
+                    texts.push(text);
+                }
             }
         }
     }
+
     if texts.is_empty() {
         return None;
     }
@@ -868,5 +915,63 @@ mod tests {
             Some("abc".to_string())
         );
         assert_eq!(select_text(&doc, "a@href"), Some("/book/1".to_string()));
+    }
+
+    #[test]
+    fn test_select_all_text_chain() {
+        let doc = parse_document(
+            r#"<div class="article"><div class="content"><p>First paragraph</p><p>Second paragraph</p></div></div>"#,
+        );
+        // Chain: .article -> .content -> @text
+        assert_eq!(
+            select_all_text(&doc, ".article@.content@text"),
+            Some("First paragraph Second paragraph".to_string())
+        );
+    }
+
+    #[test]
+    fn test_select_all_text_chain_textnodes() {
+        let doc = parse_document(
+            r#"<div class="article"><div class="content"><p>First</p><p>Second</p></div></div>"#,
+        );
+        // Chain with textNodes extraction
+        assert_eq!(
+            select_all_text(&doc, ".article@.content@textNodes"),
+            Some("First\nSecond".to_string())
+        );
+    }
+
+    #[test]
+    fn test_select_all_text_chain_html() {
+        let doc =
+            parse_document(r#"<div class="article"><div class="content"><p>Text</p></div></div>"#);
+        // Chain with html extraction - @html returns inner HTML of matched element
+        assert_eq!(
+            select_all_text(&doc, ".article@.content@html"),
+            Some("<div class=\"content\"><p>Text</p></div>".to_string())
+        );
+    }
+
+    #[test]
+    fn test_select_all_text_three_level_chain() {
+        let doc = parse_document(
+            r#"<div id="page"><div class="article"><div class="body"><p>Hello</p></div></div></div>"#,
+        );
+        // Three-level chain: #page -> .article -> .body -> @text
+        assert_eq!(
+            select_all_text(&doc, "#page@.article@.body@text"),
+            Some("Hello".to_string())
+        );
+    }
+
+    #[test]
+    fn test_select_all_text_chain_as_selector() {
+        let doc =
+            parse_document(r#"<div class="article"><span class="inner">Content</span></div>"#);
+        // Last part is a CSS selector, not an extractor
+        assert_eq!(
+            select_all_text(&doc, ".article@.inner"),
+            Some("Content".to_string())
+        );
     }
 }

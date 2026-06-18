@@ -319,6 +319,19 @@ impl RuleEngine {
                     }
                 };
 
+                // Fallback: if content looks like a TOC, try ownText extraction
+                if !content.is_empty() && crate::service::catalog::is_catalog_like(&content) {
+                    if let Some(rule_str) = rule.content.as_deref() {
+                        let doc = html::parse_document(&content_body);
+                        let alt_rule = ensure_extractor_suffix(rule_str, "ownText");
+                        if let Some(alt) = html::select_all_text(&doc, &alt_rule) {
+                            if !alt.is_empty() && !crate::service::catalog::is_catalog_like(&alt) {
+                                content = alt;
+                            }
+                        }
+                    }
+                }
+
                 if let Some(replace) = rule.replace_regex.as_deref() {
                     content = apply_legado_regex(&content, replace);
                 }
@@ -2266,6 +2279,23 @@ fn is_truthy(value: String) -> bool {
         value.to_ascii_lowercase().as_str(),
         "0" | "false" | "null" | "none" | "no" | "off"
     )
+}
+
+/// Ensure a content rule has a text extractor suffix
+fn ensure_extractor_suffix(rule: &str, extractor: &str) -> String {
+    let rule = rule.trim();
+    // If rule already ends with a known extractor, return as-is
+    if rule.ends_with("@text")
+        || rule.ends_with("@textNodes")
+        || rule.ends_with("@ownText")
+        || rule.ends_with("@html")
+        || rule.ends_with("@all")
+    {
+        return rule.to_string();
+    }
+    // Strip any trailing @@ chain and append the extractor
+    let base = rule.split("@@").next().unwrap_or(rule).trim();
+    format!("{}@{}", base, extractor)
 }
 
 /// Extract chapter number from title
