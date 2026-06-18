@@ -260,6 +260,36 @@ fn eval_js_inner_with_source(
                 },
             ),
         )?;
+        // P3: desDecodeToString - DES decryption
+        java_obj.set(
+            "desDecodeToString",
+            Func::new(
+                |input: String, key: String, _algorithm: String, _iv: String| -> String {
+                    java_des_decode(&input, &key)
+                },
+            ),
+        )?;
+        // P3: desBase64DecodeToString - DES Base64 decryption
+        java_obj.set(
+            "desBase64DecodeToString",
+            Func::new(
+                |input: String, key: String, _algorithm: String, _iv: String| -> String {
+                    match base64::engine::general_purpose::STANDARD.decode(&input) {
+                        Ok(bytes) => java_des_decode_bytes(&bytes, &key),
+                        Err(_) => String::new(),
+                    }
+                },
+            ),
+        )?;
+        // P3: tripleDESDecodeStr - 3DES decryption
+        java_obj.set(
+            "tripleDESDecodeStr",
+            Func::new(
+                |input: String, key: String, _algorithm: String, _iv: String| -> String {
+                    java_3des_decode(&input, &key)
+                },
+            ),
+        )?;
         java_obj.set(
             "encodeURIComponent",
             Func::new(|input: String| -> String { urlencoding::encode(&input).into_owned() }),
@@ -372,6 +402,32 @@ fn eval_js_inner_with_source(
                 }
             }),
         )?;
+        // P3: readTxtFile - read text file from cache directory
+        java_obj.set(
+            "readTxtFile",
+            Func::new(|path: String| -> String {
+                std::fs::read_to_string(&path).unwrap_or_default()
+            }),
+        )?;
+        // P3: writeFile - write text to file
+        java_obj.set(
+            "writeFile",
+            Func::new(|path: String, content: String| -> bool {
+                std::fs::write(&path, content).is_ok()
+            }),
+        )?;
+        // P3: deleteFile - delete file
+        java_obj.set(
+            "deleteFile",
+            Func::new(|path: String| -> bool { std::fs::remove_file(&path).is_ok() }),
+        )?;
+        // P3: unzipFile - extract zip (stub: returns path as-is)
+        java_obj.set("unzipFile", Func::new(|path: String| -> String { path }))?;
+        // P3: getZipStringContent - read zip content (stub)
+        java_obj.set(
+            "getZipStringContent",
+            Func::new(|_url: String, _path: String| -> String { String::new() }),
+        )?;
         globals.set("java", java_obj)?;
 
         globals.set(
@@ -457,6 +513,67 @@ fn java_aes_base64_decode_to_string(input: &str, key: &str, algorithm: &str, iv:
         .ok()
         .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
         .unwrap_or_default()
+}
+
+fn java_des_decode(input: &str, key: &str) -> String {
+    use des::cipher::{BlockDecryptMut, KeyInit};
+    let cipher = des::Des::new_from_slice(key.as_bytes()).ok();
+    if let Some(mut cipher) = cipher {
+        let mut buf = input.as_bytes().to_vec();
+        for chunk in buf.chunks_mut(8) {
+            if chunk.len() == 8 {
+                let mut block = des::cipher::generic_array::GenericArray::clone_from_slice(chunk);
+                cipher.decrypt_block_mut(&mut block);
+                chunk.copy_from_slice(&block);
+            }
+        }
+        String::from_utf8(buf).unwrap_or_default()
+    } else {
+        String::new()
+    }
+}
+
+fn java_des_decode_bytes(input: &[u8], key: &str) -> String {
+    use des::cipher::{BlockDecryptMut, KeyInit};
+    let cipher = des::Des::new_from_slice(key.as_bytes()).ok();
+    if let Some(mut cipher) = cipher {
+        let mut buf = input.to_vec();
+        for chunk in buf.chunks_mut(8) {
+            if chunk.len() == 8 {
+                let mut block = des::cipher::generic_array::GenericArray::clone_from_slice(chunk);
+                cipher.decrypt_block_mut(&mut block);
+                chunk.copy_from_slice(&block);
+            }
+        }
+        String::from_utf8(buf).unwrap_or_default()
+    } else {
+        String::new()
+    }
+}
+
+fn java_3des_decode(input: &str, key: &str) -> String {
+    let key_bytes = key.as_bytes();
+    if key_bytes.len() < 24 {
+        return String::new();
+    }
+    let mut buf = input.as_bytes().to_vec();
+    des_decrypt_blocks(&mut buf, &key_bytes[16..24]);
+    des_decrypt_blocks(&mut buf, &key_bytes[8..16]);
+    des_decrypt_blocks(&mut buf, &key_bytes[0..8]);
+    String::from_utf8(buf).unwrap_or_default()
+}
+
+fn des_decrypt_blocks(data: &mut [u8], key: &[u8]) {
+    use des::cipher::{BlockDecryptMut, KeyInit};
+    if let Ok(mut cipher) = des::Des::new_from_slice(key) {
+        for chunk in data.chunks_mut(8) {
+            if chunk.len() == 8 {
+                let mut block = des::cipher::generic_array::GenericArray::clone_from_slice(chunk);
+                cipher.decrypt_block_mut(&mut block);
+                chunk.copy_from_slice(&block);
+            }
+        }
+    }
 }
 
 fn eval_script<'js>(ctx: rquickjs::Ctx<'js>, script: &str) -> anyhow::Result<Value<'js>> {
