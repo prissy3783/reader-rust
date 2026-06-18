@@ -55,6 +55,7 @@ export interface SearchBook {
   updateTime?: string
   wordCount?: string
   bookSourceUrls?: string[]
+  latencyMs?: number
 }
 
 // ─── 章节 ───

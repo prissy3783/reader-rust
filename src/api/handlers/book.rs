@@ -2411,10 +2411,18 @@ pub async fn get_available_book_source_sse(
                 let target_author = book.author.clone();
                 let user_ns_value = user_ns.clone();
                 tasks.spawn(async move {
+                    let start = std::time::Instant::now();
                     let res = svc
                         .search_book(&user_ns_value, &source, &target_name, 1)
                         .await;
-                    (source_index as i32, res, target_name, target_author)
+                    let latency_ms = start.elapsed().as_millis() as u64;
+                    (
+                        source_index as i32,
+                        res,
+                        target_name,
+                        target_author,
+                        latency_ms,
+                    )
                 });
                 next_index += 1;
             }
@@ -2424,7 +2432,7 @@ pub async fn get_available_book_source_sse(
             }
 
             match tasks.join_next().await {
-                Some(Ok((source_index, search_result, target_name, target_author))) => {
+                Some(Ok((source_index, search_result, target_name, target_author, latency_ms))) => {
                     last_idx = last_idx.max(source_index);
                     match search_result {
                         Ok(list) => {
@@ -2442,7 +2450,8 @@ pub async fn get_available_book_source_sse(
                                 let payload = serde_json::json!({
                                     "lastIndex": source_index,
                                     "hasMore": next_index < sources.len() || !tasks.is_empty(),
-                                    "data": [book]
+                                    "data": [book],
+                                    "latencyMs": latency_ms
                                 });
                                 if tx
                                     .send(Event::default().data(payload.to_string()))

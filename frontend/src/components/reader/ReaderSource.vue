@@ -53,6 +53,7 @@
           <div class="source-name-row">
             <span class="source-name">{{ item.book.origin }}</span>
             <span class="source-tag" v-if="item.book.kind">{{ item.book.kind }}</span>
+            <span v-if="item.latencyMs" class="source-latency" :class="latencyClass(item.latencyMs)">{{ formatLatency(item.latencyMs) }}</span>
             <span v-if="item.sameLatest" class="compare-badge good">最新章节一致</span>
             <span v-else-if="item.book.lastChapter" class="compare-badge">章节不同</span>
           </div>
@@ -134,6 +135,7 @@ type CandidateItem = {
   sameLatest: boolean
   chapterHint: string
   score: number
+  latencyMs: number | null
 }
 
 const store = useReaderStore()
@@ -168,6 +170,17 @@ function normalizeAuthorText(value?: string) {
   return normalizeText(value).replace(/^作者/, '')
 }
 
+function latencyClass(ms: number): string {
+  if (ms < 1000) return 'fast'
+  if (ms < 3000) return 'medium'
+  return 'slow'
+}
+
+function formatLatency(ms: number): string {
+  if (ms < 1000) return ms + 'ms'
+  return (ms / 1000).toFixed(1) + 's'
+}
+
 const preparedResults = computed<CandidateItem[]>(() => {
   if (!store.book) return []
   const currentName = normalizeText(store.book.name)
@@ -183,7 +196,7 @@ const preparedResults = computed<CandidateItem[]>(() => {
         ? '可无缝续读'
         : (book.lastChapter ? `目标源最新：${book.lastChapter}` : '')
       const score = (sameName ? 3 : 0) + (sameAuthor ? 3 : 0) + (sameLatest ? 4 : 0)
-      return { book, sameName, sameAuthor, sameLatest, chapterHint, score }
+      return { book, sameName, sameAuthor, sameLatest, chapterHint, score, latencyMs: book.latencyMs ?? null }
     })
     .sort((a, b) => b.score - a.score)
 })
@@ -232,6 +245,7 @@ type AvailableSourceSSEPayload = {
   books?: SearchBook[]
   lastIndex?: number
   hasMore?: boolean
+  latencyMs?: number
 }
 
 function closeAvailableSourceSSE() {
@@ -254,6 +268,10 @@ function applyAvailableSourcePayload(payload: AvailableSourceSSEPayload | null) 
   const incoming = Array.isArray(payload.data)
     ? payload.data
     : (Array.isArray(payload.books) ? payload.books : [])
+
+  if (payload.latencyMs != null) {
+    incoming.forEach(b => { b.latencyMs = payload.latencyMs })
+  }
 
   if (typeof payload.lastIndex === 'number') {
     lastIndex.value = payload.lastIndex
@@ -496,6 +514,10 @@ async function handleSwitch(res: SearchBook) {
 
 .source-main { flex: 1; min-width: 0; }
 .source-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.source-latency { font-size: 11px; padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; }
+.source-latency.fast { background: rgba(76, 175, 80, 0.12); color: #4CAF50; }
+.source-latency.medium { background: rgba(255, 193, 7, 0.12); color: #FFC107; }
+.source-latency.slow { background: rgba(244, 67, 54, 0.12); color: #F44336; }
 .source-name { font-weight: 600; font-size: 14px; }
 .source-tag { font-size: 10px; opacity: 0.5; border: 1px solid currentColor; padding: 0 3px; border-radius: 3px; }
 .compare-badge {
