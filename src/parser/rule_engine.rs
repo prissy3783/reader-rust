@@ -343,11 +343,14 @@ impl RuleEngine {
                     }
                     _ => {
                         let doc = html::parse_document(&content_body);
+                        let is_css =
+                            content_rule.starts_with("@css:") || content_rule.starts_with("@CSS:");
                         let selector = self.strip_mode_prefix(&content_rule);
-                        let result = html::select_all_text(&doc, selector);
+                        let result = html::select_all_text_with_mode(&doc, selector, is_css);
                         tracing::debug!(
-                            "[ContentDebug] CSS selector='{}', extracted_len={}",
+                            "[ContentDebug] CSS selector='{}', is_css={}, extracted_len={}",
                             selector,
+                            is_css,
                             result.as_deref().map(|s| s.len()).unwrap_or(0)
                         );
                         result.unwrap_or_default()

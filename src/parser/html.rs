@@ -585,6 +585,35 @@ fn collect_text_nodes(el: ElementRef, texts: &mut Vec<String>) {
 }
 
 pub fn select_text_from_element(el: &ElementRef, rule: &str) -> Option<String> {
+    select_text_from_element_with_mode(el, rule, false)
+}
+
+pub fn select_text_from_element_with_mode(
+    el: &ElementRef,
+    rule: &str,
+    is_css: bool,
+) -> Option<String> {
+    let rule = rule.trim();
+    if rule.is_empty() {
+        return None;
+    }
+
+    if is_css && rule.contains('@') {
+        let last_at = rule.rfind('@').unwrap();
+        let css_part = rule[..last_at].trim();
+        let extractor_part = rule[last_at + 1..].trim();
+
+        if css_part.is_empty() {
+            return None;
+        }
+
+        let parsed = parse_selector_with_index(css_part);
+        let matches = collect_matches_from_element(*el, &parsed);
+        return matches
+            .into_iter()
+            .find_map(|current| extract_text(&current, extractor_part));
+    }
+
     let parts = split_top_level(rule, &["@"]).parts;
     let mut current_matches = vec![*el];
 
@@ -619,12 +648,51 @@ pub fn select_text_from_element(el: &ElementRef, rule: &str) -> Option<String> {
 
 /// Select all matching elements and collect their text, joined by newlines
 pub fn select_all_text(doc: &Html, rule: &str) -> Option<String> {
+    select_all_text_with_mode(doc, rule, false)
+}
+
+/// Select all matching elements and collect their text, joined by newlines.
+/// When `is_css` is true, the rule is treated as CSS mode: split at the LAST `@`
+/// to separate CSS selector from extractor (matching hectorqin AnalyzeByJSoup behavior).
+pub fn select_all_text_with_mode(doc: &Html, rule: &str, is_css: bool) -> Option<String> {
+    let rule = rule.trim();
+    if rule.is_empty() {
+        return None;
+    }
+
+    if is_css && rule.contains('@') {
+        let last_at = rule.rfind('@').unwrap();
+        let css_part = rule[..last_at].trim();
+        let extractor_part = rule[last_at + 1..].trim();
+
+        if css_part.is_empty() {
+            return None;
+        }
+
+        let roots = collect_matches(doc, &parse_selector_with_index(css_part));
+        if roots.is_empty() {
+            return None;
+        }
+
+        let mut texts = Vec::new();
+        for el in &roots {
+            if let Some(text) = extract_text(el, extractor_part) {
+                if !text.is_empty() {
+                    texts.push(text);
+                }
+            }
+        }
+        if texts.is_empty() {
+            return None;
+        }
+        return Some(texts.join("\n"));
+    }
+
     let parts = split_top_level(rule, &["@"]).parts;
     if parts.is_empty() {
         return None;
     }
 
-    // Single part: no chain, use textNodes extraction on matched elements
     if parts.len() == 1 {
         let selector = parts[0].trim();
         let roots = collect_matches(doc, &parse_selector_with_index(selector));
@@ -645,12 +713,9 @@ pub fn select_all_text(doc: &Html, rule: &str) -> Option<String> {
         return Some(texts.join("\n"));
     }
 
-    // Multi-part chain: follow DOM step by step like select_list
-    // Last part is the text extractor, preceding parts are CSS selectors
     let extractor_part = parts.last().unwrap().trim();
     let selector_parts = &parts[..parts.len() - 1];
 
-    // Determine if the last part is a known text extractor or a CSS selector
     let is_extractor = matches!(
         extractor_part,
         "text"
@@ -666,7 +731,6 @@ pub fn select_all_text(doc: &Html, rule: &str) -> Option<String> {
     ) || extractor_part.starts_with("@attr[")
         || extractor_part.starts_with("attr[");
 
-    // Navigate the @ chain for selector parts
     let mut current_matches: Vec<ElementRef> = vec![];
     for (i, part) in selector_parts.iter().enumerate() {
         let part = part.trim();
@@ -688,7 +752,6 @@ pub fn select_all_text(doc: &Html, rule: &str) -> Option<String> {
         }
     }
 
-    // Apply text extraction on the final matches
     let mut texts = Vec::new();
     if is_extractor {
         for el in &current_matches {
@@ -699,7 +762,6 @@ pub fn select_all_text(doc: &Html, rule: &str) -> Option<String> {
             }
         }
     } else {
-        // Last part is also a CSS selector (e.g., .article@div@span)
         let parsed = parse_selector_with_index(extractor_part);
         let mut final_matches = Vec::new();
         for current in &current_matches {
@@ -972,6 +1034,51 @@ mod tests {
         assert_eq!(
             select_all_text(&doc, ".article@.inner"),
             Some("Content".to_string())
+        );
+    }
+
+    #[test]
+    fn test_select_all_text_css_mode_split_at_last_at() {
+        let doc = parse_document(r#"<div class="article"><p>Para1</p><p>Para2</p></div>"#);
+        // CSS mode: split at last @ → CSS selector ".article" + extractor "text"
+        assert_eq!(
+            select_all_text_with_mode(&doc, ".article@text", true),
+            Some("Para1 Para2".to_string())
+        );
+    }
+
+    #[test]
+    fn test_select_all_text_css_mode_complex_selector() {
+        let doc = parse_document(
+            r#"<div id="content"><div class="article"><p>Text1</p><p>Text2</p></div></div>"#,
+        );
+        // CSS mode: split at last @ → CSS selector "#content .article" + extractor "textNodes"
+        assert_eq!(
+            select_all_text_with_mode(&doc, "#content .article@textNodes", true),
+            Some("Text1\nText2".to_string())
+        );
+    }
+
+    #[test]
+    fn test_select_all_text_css_mode_no_extractor() {
+        let doc = parse_document(r#"<div class="article"><p>Text</p></div>"#);
+        // CSS mode without @ → no split, treat as pure CSS selector
+        // is_css=true but no @ in rule → falls through to non-CSS path
+        let result = select_all_text_with_mode(&doc, ".article", true);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("Text"));
+    }
+
+    #[test]
+    fn test_select_text_from_element_css_mode() {
+        let doc = parse_document(
+            r#"<div class="article"><a href="/1">Link1</a><a href="/2">Link2</a></div>"#,
+        );
+        let el = doc.root_element();
+        // CSS mode: split at last @ → CSS ".article a" + extractor "href"
+        assert_eq!(
+            select_text_from_element_with_mode(&el, ".article a@href", true),
+            Some("/1".to_string())
         );
     }
 }
